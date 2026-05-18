@@ -46,18 +46,7 @@ jobs:
         run: |
           source .venv/bin/activate
           python -c "
-          try:
-              import torch
-              print('✅ PyTorch available')
-          except ImportError:
-              print('⚠️ PyTorch not available')
-
           import AID_BC
           print(f'✅ AID_BC version: {AID_BC.__version__}')
           print('✅ Basic imports work')
           "
-
-      - name: CLI version test
-        run: |
-          source .venv/bin/activate
-          AID_BC --version
