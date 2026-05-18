@@ -1,7 +1,7 @@
 AID-BC
 ======
 
-AID-BC (AI for Data assimilation in Biogeochemical models) is a Python-based framework for bias correction.
+AID-BC (AI Downscaling Bias Correction) is a Python-based framework for bias correction.
 
 GitHub repository: https://github.com/kardaneh/AID-BC
 
