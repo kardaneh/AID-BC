@@ -114,7 +114,7 @@ class Logger:
             self.console.print(
                 Panel(
                     f"[bold red]🚀 Starting Module:[/bold red] [cyan]{self.module_name}[/cyan]",
-                    title="Radiative Transfer Neural Networks",
+                    title="AI Downscaling Bias Correction",
                     border_style="bright_blue",
                 )
             )

@@ -7,7 +7,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(__file__, "../../.."))
 sys.path.insert(0, PROJECT_ROOT)
 
 # Project information
-project = "RTnn"
+project = "AID-BC"
 copyright = f"{datetime.now().year}, K. Ardaneh / CNRS / IPSL / Sorbonne University"
 author = "Kazem Ardaneh"
 release = "0.1.0"

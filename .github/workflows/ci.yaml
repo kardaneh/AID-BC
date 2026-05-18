@@ -37,15 +37,7 @@ jobs:
       - name: Run unit tests
         run: |
           source .venv/bin/activate
-          python -m unittest tests.test_rnn
-          python -m unittest tests.test_fcn
-          python -m unittest tests.test_transformer
-          python -m unittest tests.test_evaluater
-          python -m unittest tests.test_model_loader
-          python -m unittest tests.test_model_utils
-          python -m unittest tests.test_utils
           python -m unittest tests.test_logger
-          python -m unittest tests.test_dataset
 
       - name: Check package builds
         run: uv build
@@ -60,12 +52,12 @@ jobs:
           except ImportError:
               print('⚠️ PyTorch not available')
 
-          import rtnn
-          print(f'✅ RTnn version: {rtnn.__version__}')
+          import AID_BC
+          print(f'✅ AID_BC version: {AID_BC.__version__}')
           print('✅ Basic imports work')
           "
 
       - name: CLI version test
         run: |
           source .venv/bin/activate
-          rtnn --version
+          AID_BC --version

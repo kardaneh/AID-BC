@@ -6,12 +6,12 @@
 # To view a copy of this license, visit
 # http://creativecommons.org/licenses/by-nc-sa/4.0/
 
-"""Version information for rtnn."""
+"""Models for bias correction"""
 
-__version__ = "0.1.0"
-__version_info__ = tuple(int(x) for x in __version__.split("."))
+from AID_BC.models.qm import QuantileMapper
+from AID_BC.models.ot import OptimalTransportMapper
 
-
-def get_version():
-    """Return the version string."""
-    return __version__
+__all__ = [
+    "QuantileMapper",
+    "OptimalTransportMapper",
+]

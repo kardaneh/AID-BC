@@ -1,7 +1,7 @@
-RTnn API Reference
-==================
+AID-BC API Reference
+====================
 
 .. toctree::
    :maxdepth: 4
 
-   rtnn
+   AID_BC
