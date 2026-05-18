@@ -7,7 +7,7 @@
 # http://creativecommons.org/licenses/by-nc-sa/4.0/
 
 import logging
-from rtnn.logger import Logger
+from AID_BC.logger import Logger
 import unittest
 import os
 import tempfile
