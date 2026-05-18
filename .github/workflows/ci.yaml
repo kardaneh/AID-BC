@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, develop ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:  # Allow manual triggers
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Create virtual environment and install dependencies
+        run: |
+          uv venv
+          source .venv/bin/activate
+          uv pip install -e ".[ci,dev]"
+
+      - name: Run pre-commit
+        run: |
+          source .venv/bin/activate
+          pre-commit run --all-files
+
+      - name: Run unit tests
+        run: |
+          source .venv/bin/activate
+          python -m unittest tests.test_rnn
+          python -m unittest tests.test_fcn
+          python -m unittest tests.test_transformer
+          python -m unittest tests.test_evaluater
+          python -m unittest tests.test_model_loader
+          python -m unittest tests.test_model_utils
+          python -m unittest tests.test_utils
+          python -m unittest tests.test_logger
+          python -m unittest tests.test_dataset
+
+      - name: Check package builds
+        run: uv build
+
+      - name: Basic import test
+        run: |
+          source .venv/bin/activate
+          python -c "
+          try:
+              import torch
+              print('✅ PyTorch available')
+          except ImportError:
+              print('⚠️ PyTorch not available')
+
+          import rtnn
+          print(f'✅ RTnn version: {rtnn.__version__}')
+          print('✅ Basic imports work')
+          "
+
+      - name: CLI version test
+        run: |
+          source .venv/bin/activate
+          rtnn --version
