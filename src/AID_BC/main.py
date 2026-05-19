@@ -12,9 +12,9 @@ from pathlib import Path
 import numpy as np
 import gc
 
-from dataset import ClimateDataset
-from logger import Logger
-from quantile_mapping import QM
+from AID_BC.dataset import ClimateDataset
+from AID_BC.logger import Logger
+from AID_BC.quantile_mapping import QM
 
 
 def parse_args():
