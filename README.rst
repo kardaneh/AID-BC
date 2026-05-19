@@ -1,5 +1,6 @@
 AID-BC
-=========================================
+======
+
 AI Downscaling and Bias Correction (AID-BC) is a Python package for bias correction of climate data using machine learning techniques.
 
 The package currently provides tools for:
@@ -9,23 +10,25 @@ The package currently provides tools for:
 - running univariate bias-correction examples;
 - testing dataset utilities.
 
-
 Repository structure
 --------------------
 
 .. code-block:: text
 
-   AID_BC/
-   ├── dataset.py
-   ├── logger.py
-   ├── main.py
-   ├── quantile_mapping.py
-   └── version.py
+   src/
+   └── AID_BC/
+       ├── __init__.py
+       ├── __main__.py
+       ├── dataset.py
+       ├── logger.py
+       ├── main.py
+       ├── quantile_mapping.py
+       └── version.py
 
    notebooks/
    └── BSCK_2013_2014.ipynb
 
    tests/
-   └── test_dataset.py
-   └── test_logger.py
+   ├── test_dataset.py
+   ├── test_logger.py
    └── test_runner.py
