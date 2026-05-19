@@ -16,7 +16,10 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(
+    0,
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")),
+)
 
 from AID_BC.logger import Logger
 from AID_BC.dataset import ClimateDataset

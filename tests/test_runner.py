@@ -12,9 +12,14 @@ import unittest
 from datetime import datetime
 
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(
+    0,
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")),
+)
 
-from AID_BC import Logger
+from AID_BC.logger import Logger
+
+# python tests/test_runner.py
 
 
 class TestRunner:
@@ -68,7 +73,7 @@ class TestRunner:
             True if all tests passed, False otherwise.
         """
         # Show header
-        self.logger.show_header("RTnn Test Suite")
+        self.logger.show_header("AID-BC Test Suite")
 
         # Start task
         self.logger.start_task(
@@ -167,7 +172,7 @@ def main():
     """Main entry point for running tests."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Run RTnn tests with custom logger")
+    parser = argparse.ArgumentParser(description="Run AID-BC tests with custom logger")
     parser.add_argument(
         "--pattern",
         type=str,

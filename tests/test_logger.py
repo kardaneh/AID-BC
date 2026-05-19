@@ -6,12 +6,22 @@
 # To view a copy of this license, visit
 # http://creativecommons.org/licenses/by-nc-sa/4.0/
 
-import logging
-from AID_BC.logger import Logger
-import unittest
+
 import os
-import tempfile
+import sys
 import shutil
+import logging
+import unittest
+import tempfile
+
+
+sys.path.insert(
+    0,
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")),
+)
+from AID_BC.logger import Logger
+
+# python tests/test_logger.py
 
 
 class TestLogger(unittest.TestCase):
@@ -643,3 +653,22 @@ class TestLogger(unittest.TestCase):
             self.test_logger.info(
                 f"Test teardown - removed temp directory: {self.temp_dir}"
             )
+
+
+def run_tests():
+    """Run all Logger tests."""
+    loader = unittest.TestLoader()
+    suite = unittest.TestSuite()
+
+    # Add test class
+    suite.addTests(loader.loadTestsFromTestCase(TestLogger))
+
+    runner = unittest.TextTestRunner(verbosity=2)
+    result = runner.run(suite)
+
+    return result.wasSuccessful()
+
+
+if __name__ == "__main__":
+    success = run_tests()
+    sys.exit(0 if success else 1)

@@ -84,7 +84,7 @@ class Logger:
             self.console.print(
                 Panel(
                     f"[bold red]🚀 Starting Module:[/bold red] [cyan]{self.module_name}[/cyan]",
-                    title="IPSL AI Downscaling Tool",
+                    title="IPSL AID-BC Tool",
                     border_style="bright_blue",
                 )
             )
