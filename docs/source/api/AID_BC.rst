@@ -28,6 +28,14 @@ AID_BC.main module
    :undoc-members:
    :show-inheritance:
 
+AID_BC.preprocess module
+------------------------
+
+.. automodule:: AID_BC.preprocess
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 AID_BC.quantile_mapping module
 ------------------------------
 

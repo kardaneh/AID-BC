@@ -7,12 +7,12 @@
 # http://creativecommons.org/licenses/by-nc-sa/4.0/
 
 import argparse
+import gc
 from pathlib import Path
 
 import numpy as np
-import gc
+import xarray as xr
 
-from AID_BC.dataset import ClimateDataset
 from AID_BC.logger import Logger
 from AID_BC.quantile_mapping import QM
 
@@ -27,7 +27,9 @@ def parse_args():
         Parsed arguments.
     """
 
-    parser = argparse.ArgumentParser(description="Quantile Mapping bias correction")
+    parser = argparse.ArgumentParser(
+        description="Quantile Mapping bias correction using preprocessed Zarr data"
+    )
 
     # First year used to train the QM correction
     parser.add_argument(
@@ -50,17 +52,17 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--cmip6_train_root",
+        "--cmip6_train_zarr",
         type=str,
         required=True,
-        help="CMIP6 historical root directory",
+        help="Preprocessed CMIP6 training Zarr path",
     )
 
     parser.add_argument(
-        "--cmip6_apply_root",
+        "--cmip6_apply_zarr",
         type=str,
         required=True,
-        help="CMIP6 future root directory",
+        help="Preprocessed CMIP6 application Zarr path",
     )
 
     parser.add_argument(
@@ -68,14 +70,45 @@ def parse_args():
     )
 
     # Number of latitude points processed at once
-    parser.add_argument("--chunk_lat", type=int, default=64, help="Latitude chunk size")
+    parser.add_argument(
+        "--chunk_lat", type=int, default=144, help="Latitude chunk size"
+    )
 
     # Number of longitude points processed at once
     parser.add_argument(
-        "--chunk_lon", type=int, default=64, help="Longitude chunk size"
+        "--chunk_lon", type=int, default=360, help="Longitude chunk size"
     )
 
     return parser.parse_args()
+
+
+def build_era5_paths(start_year, end_year, era5_root):
+    """
+    Build ERA5 file paths for the training period.
+
+    Parameters
+    ----------
+    start_year : int
+        Training start year.
+
+    end_year : int
+        Training end year.
+
+    era5_root : str
+        ERA5 root directory.
+
+    Returns
+    -------
+    list[str]
+        ERA5 file paths.
+    """
+
+    # ERA5 files are expected to follow the naming convention samples_<year>.nc
+    # same as IPSL-AID
+    return [
+        str(Path(era5_root) / f"samples_{year}.nc")
+        for year in range(start_year, end_year + 1)
+    ]
 
 
 def iter_spatial_chunks(n_lat, n_lon, chunk_lat, chunk_lon):
@@ -112,23 +145,26 @@ def iter_spatial_chunks(n_lat, n_lon, chunk_lat, chunk_lon):
             # Ensure the last longitude chunk does not exceed the grid size
             lon_end = min(lon_start + chunk_lon, n_lon)
 
-            # Yield the latitude and longitude slices for this chunk
+            # Return slices defining the current spatial chunk
             yield (slice(lat_start, lat_end), slice(lon_start, lon_end))
 
 
 def apply_qm_by_spatial_chunks(
-    train_datasets, ds_apply, variable_name, chunk_lat, chunk_lon, logger
+    Y_train, X_train, X_apply, variable_name, chunk_lat, chunk_lon, logger
 ):
     """
     Apply Quantile Mapping chunk by chunk.
 
     Parameters
     ----------
-    train_datasets : list[ClimateDataset]
-        Prepared training datasets.
+    Y_train : xr.DataArray
+        ERA5 reference training data.
 
-    ds_apply : ClimateDataset
-        Prepared application dataset.
+    X_train : xr.DataArray
+        Preprocessed CMIP6 training data on ERA5 grid.
+
+    X_apply : xr.DataArray
+        Preprocessed CMIP6 application data on ERA5 grid.
 
     variable_name : str
         Variable name.
@@ -148,22 +184,26 @@ def apply_qm_by_spatial_chunks(
         Bias-corrected application data.
     """
 
-    # Reorder the application data dimensions to ensure a consistent layout
-    apply_data = ds_apply.cmip6_data.transpose("time", "latitude", "longitude")
+    # Ensure all input arrays use the same dimension order
+    Y_train = Y_train.transpose("time", "latitude", "longitude")
+
+    X_train = X_train.transpose("time", "latitude", "longitude")
+
+    X_apply = X_apply.transpose("time", "latitude", "longitude")
 
     # Get the number of latitude and longitude points
-    n_lat = apply_data.sizes["latitude"]
-    n_lon = apply_data.sizes["longitude"]
+    n_lat = X_apply.sizes["latitude"]
+    n_lon = X_apply.sizes["longitude"]
 
     # Allocate the full output array that will store corrected values
-    Z_apply = np.empty(apply_data.shape, dtype=np.float32)
+    Z_apply = np.empty(X_apply.shape, dtype=np.float32)
 
     # Compute the total number of chunks
     total_chunks = int(np.ceil(n_lat / chunk_lat)) * int(np.ceil(n_lon / chunk_lon))
 
     chunk_id = 0
 
-    # Iterate over all spatial chunks of the grid
+    # Process each spatial chunk independently to reduce memory usage
     for lat_slice, lon_slice in iter_spatial_chunks(
         n_lat=n_lat, n_lon=n_lon, chunk_lat=chunk_lat, chunk_lon=chunk_lon
     ):
@@ -175,75 +215,60 @@ def apply_qm_by_spatial_chunks(
             f"lat={lat_slice}, lon={lon_slice}"
         )
 
-        # Store ERA5 and CMIP6 training chunks for all training years
-        Y_train_chunks = []
-        X_train_chunks = []
+        logger.info("Reading ERA5 training chunk")
 
-        # Read the corresponding spatial chunk from each training dataset
-        for ds_train in train_datasets:
-            logger.info(f"Reading ERA5 chunk from {ds_train.era5_path}")
+        # Read the ERA5 reference data for the current spatial chunk
+        Y_chunk = Y_train.isel(latitude=lat_slice, longitude=lon_slice).values.astype(
+            np.float32
+        )
 
-            Y_chunk = (
-                ds_train.era5_data.transpose("time", "latitude", "longitude")
-                .isel(latitude=lat_slice, longitude=lon_slice)
-                .values
-            )
+        logger.info("Reading CMIP6 training chunk")
 
-            logger.info(f"Reading CMIP6 chunk from {ds_train.cmip6_path}")
+        # Read the CMIP6 training data for the same spatial chunk
+        X_train_chunk = X_train.isel(
+            latitude=lat_slice, longitude=lon_slice
+        ).values.astype(np.float32)
 
-            X_chunk = (
-                ds_train.cmip6_data.transpose("time", "latitude", "longitude")
-                .isel(latitude=lat_slice, longitude=lon_slice)
-                .values
-            )
+        logger.info("Reading CMIP6 application chunk")
 
-            # Add the ERA5 chunk to the list of observed training chunks
-            Y_train_chunks.append(Y_chunk)
+        # Read the CMIP6 data to be corrected for the same spatial chunk
+        X_apply_chunk = X_apply.isel(
+            latitude=lat_slice, longitude=lon_slice
+        ).values.astype(np.float32)
 
-            # Add the CMIP6 chunk to the list of model training chunks
-            X_train_chunks.append(X_chunk)
+        # Reshape data from 3D: time x latitude x longitude
+        # to 2D: time x grid_points, as required by the QM model
+        Y_train_2D = Y_chunk.reshape(Y_chunk.shape[0], -1)
 
-        # Concatenate
-        Y_train = np.concatenate(Y_train_chunks, axis=0)
+        X_train_2D = X_train_chunk.reshape(X_train_chunk.shape[0], -1)
 
-        X_train = np.concatenate(X_train_chunks, axis=0)
+        X_apply_2D = X_apply_chunk.reshape(X_apply_chunk.shape[0], -1)
 
-        logger.info(f"Reading apply CMIP6 chunk from {ds_apply.cmip6_path}")
+        logger.info(f"Y_train_2D shape: {Y_train_2D.shape}")
 
-        # Extract the CMIP6 chunk to be corrected
-        X_apply = apply_data.isel(latitude=lat_slice, longitude=lon_slice).values
+        logger.info(f"X_train_2D shape: {X_train_2D.shape}")
 
-        # Flatten the spatial dimensions of the ERA5 training data
-        # Shape becomes: time x spatial_points
-        Y_train_2D = Y_train.reshape(Y_train.shape[0], -1)
-
-        # Flatten the spatial dimensions of the CMIP6 training data
-        X_train_2D = X_train.reshape(X_train.shape[0], -1)
-
-        # Flatten the spatial dimensions of the CMIP6 application data
-        X_apply_2D = X_apply.reshape(X_apply.shape[0], -1)
+        logger.info(f"X_apply_2D shape: {X_apply_2D.shape}")
 
         # Create a new Quantile Mapping model for this spatial chunk
         qm = QM()
 
-        # Fit Quantile Mapping using ERA5 as reference and CMIP6 as model data
+        # Fit Quantile Mapping using ERA5 as reference and CMIP6 as model dat
         qm.fit(Y0=Y_train_2D, X0=X_train_2D)
 
         # Apply the fitted Quantile Mapping model to the application data
         Z_chunk_2D = qm.predict(X0=X_apply_2D)
 
-        # Convert corrected data to float32 and restore the original chunk shape
-        Z_chunk = Z_chunk_2D.astype(np.float32).reshape(X_apply.shape)
+        # Reshape the corrected data back to the original 3D chunk shape
+        Z_chunk = Z_chunk_2D.astype(np.float32).reshape(X_apply_chunk.shape)
 
         # Insert the corrected chunk into the full output array
         Z_apply[:, lat_slice, lon_slice] = Z_chunk
 
         # delete temporary arrays to reduce memory usage
-        del Y_train_chunks
-        del X_train_chunks
-        del Y_train
-        del X_train
-        del X_apply
+        del Y_chunk
+        del X_train_chunk
+        del X_apply_chunk
         del Y_train_2D
         del X_train_2D
         del X_apply_2D
@@ -255,87 +280,13 @@ def apply_qm_by_spatial_chunks(
         gc.collect()
 
     # Create a corrected xarray DataArray using the metadata of the input data
-    corr = apply_data.copy(data=Z_apply)
+    corr = X_apply.copy(data=Z_apply)
 
     # Assign the variable name to the corrected DataArray
     corr.name = variable_name
 
     # Return the bias-corrected application data
     return corr
-
-
-def build_paths(year, era5_root, cmip6_root):
-    """
-    Build ERA5 and CMIP6 file paths.
-
-    Parameters
-    ----------
-    year : int
-        Dataset year.
-
-    era5_root : str
-        ERA5 root directory.
-
-    cmip6_root : str
-        CMIP6 root directory.
-
-    Returns
-    -------
-    tuple[str, str]
-        ERA5 and CMIP6 file paths.
-    """
-
-    era5_path = Path(era5_root) / f"samples_{year}.nc"
-
-    cmip6_path = Path(cmip6_root) / f"samples_{year}.nc"
-
-    return str(era5_path), str(cmip6_path)
-
-
-def load_dataset(year, era5_root, cmip6_root, variable_name, logger):
-    """
-    Load and prepare climate dataset.
-
-    Parameters
-    ----------
-    year : int
-        Dataset year.
-
-    era5_root : str
-        ERA5 root directory.
-
-    cmip6_root : str
-        CMIP6 root directory.
-
-    variable_name : str
-        Variable name.
-
-    logger : Logger
-        Logger instance.
-
-    Returns
-    -------
-    ClimateDataset
-        Prepared dataset.
-    """
-
-    # Build the ERA5 and CMIP6 paths for the selected year
-    era5_path, cmip6_path = build_paths(
-        year=year, era5_root=era5_root, cmip6_root=cmip6_root
-    )
-
-    # Create a ClimateDataset instance for this year
-    ds = ClimateDataset(
-        era5_path=era5_path,
-        cmip6_path=cmip6_path,
-        variable_name=variable_name,
-        logger=logger,
-    )
-
-    # Run the complete dataset preparation pipeline
-    ds.prepare()
-
-    return ds
 
 
 def main():
@@ -347,41 +298,52 @@ def main():
 
     logger = Logger()
 
-    logger.info("Loading training datasets")
-
-    train_datasets = []
-
-    # Loop over all years included in the training period
-    for year in range(args.train_start, args.train_end + 1):
-        logger.info(f"Loading training year {year}")
-
-        # Load and prepare the dataset for the current training year
-        ds_train = load_dataset(
-            year=year,
-            era5_root=args.era5_root,
-            cmip6_root=args.cmip6_train_root,
-            variable_name=args.variable,
-            logger=logger,
-        )
-
-        train_datasets.append(ds_train)
-
     train_years = args.train_end - args.train_start + 1
 
+    logger.info(f"Opening ERA5 training data " f"({args.train_start}-{args.train_end})")
+
+    # Load ERA5 reference files for the full training period
+    era5_paths = build_era5_paths(
+        start_year=args.train_start, end_year=args.train_end, era5_root=args.era5_root
+    )
+
+    era5_train_ds = xr.open_mfdataset(
+        era5_paths, combine="nested", concat_dim="time", engine="netcdf4", cache=False
+    )
+
+    Y_train = era5_train_ds[args.variable]
+
     logger.info(
-        f"Loaded {train_years} training year(s) "
-        f"({args.train_start}-{args.train_end})"
+        f"Opening preprocessed CMIP6 training Zarr:\n" f"{args.cmip6_train_zarr}"
     )
 
-    logger.info(f"Loading application year {args.apply_year}")
+    # Load preprocessed CMIP6 data used to train the correction
+    cmip6_train_ds = xr.open_zarr(args.cmip6_train_zarr)
 
-    ds_apply = load_dataset(
-        year=args.apply_year,
-        era5_root=args.era5_root,
-        cmip6_root=args.cmip6_apply_root,
-        variable_name=args.variable,
-        logger=logger,
+    X_train = cmip6_train_ds[args.variable]
+
+    logger.info(
+        f"Opening preprocessed CMIP6 application Zarr:\n" f"{args.cmip6_apply_zarr}"
     )
+
+    # Load preprocessed CMIP6 data for the year that will be bias-corrected
+    cmip6_apply_ds = xr.open_zarr(args.cmip6_apply_zarr)
+
+    X_apply = cmip6_apply_ds[args.variable]
+
+    logger.info(f"ERA5 training shape       : {Y_train.shape}")
+
+    logger.info(f"CMIP6 training shape      : {X_train.shape}")
+
+    logger.info(f"CMIP6 application shape   : {X_apply.shape}")
+
+    # ERA5 reference and CMIP6 training data must be aligned in time and space
+    if Y_train.shape != X_train.shape:
+        raise ValueError(
+            "ERA5 training data and CMIP6 training data "
+            f"do not have the same shape: "
+            f"{Y_train.shape} != {X_train.shape}"
+        )
 
     logger.info(
         f"Applying chunked Quantile Mapping "
@@ -389,21 +351,25 @@ def main():
         f"({args.train_start}-{args.train_end})"
     )
 
-    # Apply Quantile Mapping correction chunk by chunk
+    # Apply Quantile Mapping correction to the application year
     corr = apply_qm_by_spatial_chunks(
-        train_datasets=train_datasets,
-        ds_apply=ds_apply,
+        Y_train=Y_train,
+        X_train=X_train,
+        X_apply=X_apply,
         variable_name=args.variable,
         chunk_lat=args.chunk_lat,
         chunk_lon=args.chunk_lon,
         logger=logger,
     )
 
+    output_dir = Path(args.output_dir)
+
     # Build the output NetCDF file path
     output_dir = Path(args.output_dir)
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Save the corrected data using the same file naming convention as the inputs
     output_file = output_dir / f"samples_{args.apply_year}.nc"
 
     logger.info(f"Saving corrected dataset to:\n{output_file}")
@@ -412,6 +378,11 @@ def main():
     corr.to_netcdf(output_file)
 
     logger.success("Corrected dataset successfully saved")
+
+    # Close opened datasets to release file handles and free resources.
+    era5_train_ds.close()
+    cmip6_train_ds.close()
+    cmip6_apply_ds.close()
 
 
 if __name__ == "__main__":
