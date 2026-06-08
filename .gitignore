@@ -187,3 +187,5 @@ slurm_io/*
 tests_plots/
 # Ignore all __pycache__ folders recursively
 __pycache__/
+.virtual_documents/
+download_data/

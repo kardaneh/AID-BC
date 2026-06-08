@@ -22,6 +22,12 @@ GitHub repository: https://github.com/kardaneh/AID-BC
 
 .. toctree::
    :maxdepth: 2
+   :caption: Core Concepts
+
+   quantile_mapping
+
+.. toctree::
+   :maxdepth: 2
    :caption: API Reference
 
    api/modules

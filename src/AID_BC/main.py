@@ -42,7 +42,11 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--apply_year", type=int, required=True, help="Application year"
+        "--apply_start", type=int, required=True, help="Application start year"
+    )
+
+    parser.add_argument(
+        "--apply_end", type=int, required=True, help="Application end year"
     )
 
     parser.add_argument("--variable", type=str, default="VAR_2T", help="Variable name")
@@ -109,6 +113,73 @@ def build_era5_paths(start_year, end_year, era5_root):
         str(Path(era5_root) / f"samples_{year}.nc")
         for year in range(start_year, end_year + 1)
     ]
+
+
+def select_year_range(da, start_year, end_year):
+    """
+    Select a year range from a DataArray using the time coordinate.
+
+    Parameters
+    ----------
+    da : xr.DataArray
+        Input data with a time coordinate.
+
+    start_year : int
+        First year to select.
+
+    end_year : int
+        Last year to select.
+
+    Returns
+    -------
+    xr.DataArray
+        Selected data.
+    """
+
+    return da.sel(time=slice(f"{start_year}-01-01", f"{end_year}-12-31"))
+
+
+def save_corrected_by_year(corr, output_dir, start_year, end_year, logger):
+    """
+    Save corrected data year by year as samples_<year>.nc.
+
+    Parameters
+    ----------
+    corr : xr.DataArray
+        Corrected application data.
+
+    output_dir : str or Path
+        Output directory.
+
+    start_year : int
+        First year to save.
+
+    end_year : int
+        Last year to save.
+
+    logger : Logger
+        Logger instance.
+    """
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for year in range(start_year, end_year + 1):
+        logger.info(f"Saving corrected year {year}")
+
+        corr_year = corr.sel(time=slice(f"{year}-01-01", f"{year}-12-31"))
+
+        if corr_year.sizes["time"] == 0:
+            raise ValueError(
+                f"No data found for year {year} in corrected output. "
+                f"Check the time coordinate of cmip6_apply_zarr."
+            )
+
+        output_file = output_dir / f"samples_{year}.nc"
+
+        logger.info(f"Writing:\n{output_file}")
+
+        corr_year.to_netcdf(output_file)
 
 
 def iter_spatial_chunks(n_lat, n_lon, chunk_lat, chunk_lon):
@@ -298,6 +369,18 @@ def main():
 
     logger = Logger()
 
+    if args.train_start > args.train_end:
+        raise ValueError(
+            f"train_start must be <= train_end, got "
+            f"{args.train_start} > {args.train_end}"
+        )
+
+    if args.apply_start > args.apply_end:
+        raise ValueError(
+            f"apply_start must be <= apply_end, got "
+            f"{args.apply_start} > {args.apply_end}"
+        )
+
     train_years = args.train_end - args.train_start + 1
 
     logger.info(f"Opening ERA5 training data " f"({args.train_start}-{args.train_end})")
@@ -331,6 +414,12 @@ def main():
 
     X_apply = cmip6_apply_ds[args.variable]
 
+    X_apply = select_year_range(
+        da=X_apply,
+        start_year=args.apply_start,
+        end_year=args.apply_end,
+    )
+
     logger.info(f"ERA5 training shape       : {Y_train.shape}")
 
     logger.info(f"CMIP6 training shape      : {X_train.shape}")
@@ -348,7 +437,9 @@ def main():
     logger.info(
         f"Applying chunked Quantile Mapping "
         f"trained on {train_years} year(s) "
-        f"({args.train_start}-{args.train_end})"
+        f"({args.train_start}-{args.train_end}) "
+        f"to application period "
+        f"({args.apply_start}-{args.apply_end})"
     )
 
     # Apply Quantile Mapping correction to the application year
@@ -362,22 +453,16 @@ def main():
         logger=logger,
     )
 
-    output_dir = Path(args.output_dir)
-
-    # Build the output NetCDF file path
-    output_dir = Path(args.output_dir)
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Save the corrected data using the same file naming convention as the inputs
-    output_file = output_dir / f"samples_{args.apply_year}.nc"
-
-    logger.info(f"Saving corrected dataset to:\n{output_file}")
-
     # Save the corrected data as a NetCDF file
-    corr.to_netcdf(output_file)
+    save_corrected_by_year(
+        corr=corr,
+        output_dir=args.output_dir,
+        start_year=args.apply_start,
+        end_year=args.apply_end,
+        logger=logger,
+    )
 
-    logger.success("Corrected dataset successfully saved")
+    logger.success("Corrected datasets successfully saved")
 
     # Close opened datasets to release file handles and free resources.
     era5_train_ds.close()

@@ -6,9 +6,9 @@
 # To view a copy of this license, visit
 # http://creativecommons.org/licenses/by-nc-sa/4.0/
 
-"""Main entry point for the rtnn package."""
+"""Main entry point for the AID-BC package."""
 
-from rtnn.main import main
+from AID_BC.main import main
 
 if __name__ == "__main__":
     main()
