@@ -37,7 +37,10 @@ jobs:
       - name: Run unit tests
         run: |
           source .venv/bin/activate
+          python -m unittest tests.test_dataset
           python -m unittest tests.test_logger
+          python -m unittest tests.test_preprocess
+          python -m unittest tests.test_quantile_mapping
 
       - name: Check package builds
         run: uv build
