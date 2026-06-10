@@ -21,7 +21,7 @@ sys.path.insert(
 )
 from AID_BC.logger import Logger
 
-# python tests/test_logger.py
+# python -m unittest tests.test_logger
 
 
 class TestLogger(unittest.TestCase):

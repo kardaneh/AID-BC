@@ -26,7 +26,7 @@ from AID_BC.logger import Logger
 from AID_BC.preprocess import build_paths, preprocess_year, main
 
 
-# python tests/test_preprocess.py
+# python -m unittest tests.test_preprocess
 
 
 # ============================================================================

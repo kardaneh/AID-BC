@@ -19,7 +19,7 @@ sys.path.insert(
 
 from AID_BC.logger import Logger
 
-# python tests/test_runner.py
+# python -m tests.test_runner
 
 
 class TestRunner:

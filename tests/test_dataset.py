@@ -24,7 +24,7 @@ sys.path.insert(
 from AID_BC.logger import Logger
 from AID_BC.dataset import ClimateDataset
 
-# python tests/test_dataset.py
+# python -m unittest tests.test_dataset
 
 
 # ============================================================================
