@@ -34,11 +34,50 @@ Quantile Mapping corrects a value by comparing its position in the distribution
 of the biased model data and mapping it to the corresponding value in the
 reference distribution.
 
-For a given CMIP6 value, the method first determines the quantile of that value
-within the CMIP6 training distribution. It then finds the value corresponding to
-the same quantile in the ERA5 training distribution.
+The principle is illustrated in the figure below using a simplified example with
+a model distribution and a reference distribution.
 
-Conceptually, the correction can be written as:
+.. figure:: ../../images/quantile_mapping_principle.png
+   :width: 80%
+   :align: center
+
+   Illustration of the Quantile Mapping principle. The model value is first
+   converted into a cumulative probability using the model CDF. The corrected
+   value is then obtained from the reference CDF at the same cumulative
+   probability.
+
+In this example, the value to be corrected is denoted by ``x_model``. Its
+position in the model distribution is first identified through the model
+cumulative distribution function:
+
+.. math::
+
+   q = F_{model}(x_{model})
+
+where ``q`` is the quantile associated with ``x_model``.
+The same quantile is then used in the reference distribution to
+obtain the corrected value:
+
+.. math::
+
+   x_{corrected} = F^{-1}_{reference}(q)
+
+Combining these two steps gives:
+
+.. math::
+
+   x_{corrected} = F^{-1}_{reference}(F_{model}(x_{model}))
+
+This means that the corrected value keeps the rank information from the model
+distribution while adopting the value scale of the reference distribution.
+
+Applied to the CMIP6--ERA5 bias-correction framework, the model distribution is
+the CMIP6 training distribution, and the reference distribution is the ERA5
+training distribution. For a given CMIP6 value, the method first determines the
+quantile of that value within the CMIP6 training distribution. It then finds the
+ERA5 value corresponding to the same quantile.
+
+Conceptually, the correction can therefore be written as:
 
 .. math::
 
@@ -53,8 +92,8 @@ where:
   training data,
 - ``x_corrected`` is the bias-corrected CMIP6 value.
 
-This means that the corrected value keeps the rank information from the CMIP6
-distribution while using the value scale of the ERA5 reference distribution.
+Therefore, the corrected CMIP6 value preserves its relative rank in the CMIP6
+distribution while being expressed on the ERA5 reference scale.
 
 Training and application periods
 --------------------------------
