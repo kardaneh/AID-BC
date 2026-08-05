@@ -7,7 +7,7 @@ name = "AID_BC"
 version = "0.1.0"
 description = "AID_BC: AI Donwscaling Bias Correction"
 readme = "README.rst"
-requires-python = ">=3.8"
+requires-python = ">=3.11,<3.14"
 
 authors = [
     {name = "Kazem Ardaneh", email = "kardaneh@ipsl.fr"}
@@ -49,6 +49,9 @@ dependencies = [
     "seaborn>=0.13.2",
     "dask>=2023.5.0",
     "zarr>=2.16.1",
+    "jax[cuda12]==0.10.2",
+    "torch",
+    "torchvision",
 ]
 
 [project.scripts]
@@ -79,3 +82,12 @@ docs = [
     "sphinx-copybutton>=0.5.0",
     "sphinx-autodoc-typehints>=1.24.0",
 ]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

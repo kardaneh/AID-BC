@@ -4,10 +4,26 @@ AID_BC package
 Submodules
 ----------
 
+AID_BC.bias_corrector module
+----------------------------
+
+.. automodule:: AID_BC.bias_corrector
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 AID_BC.dataset module
 ---------------------
 
 .. automodule:: AID_BC.dataset
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+AID_BC.diagnostics module
+-------------------------
+
+.. automodule:: AID_BC.diagnostics
    :members:
    :undoc-members:
    :show-inheritance:
@@ -24,6 +40,14 @@ AID_BC.main module
 ------------------
 
 .. automodule:: AID_BC.main
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+AID_BC.optimal_transport module
+-------------------------------
+
+.. automodule:: AID_BC.optimal_transport
    :members:
    :undoc-members:
    :show-inheritance:

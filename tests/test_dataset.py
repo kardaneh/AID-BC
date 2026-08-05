@@ -22,33 +22,85 @@ sys.path.insert(
 )
 
 from AID_BC.logger import Logger
-from AID_BC.dataset import ClimateDataset
+from AID_BC.dataset import ClimateDataset, resize_with_torchvision
 
 # python -m unittest tests.test_dataset
 
 
 # ============================================================================
-# Test Utilities
+# Test utilities
 # ============================================================================
 
 
-def create_dummy_era5_netcdf(temp_dir, variable_name="tas"):
-    """Create a dummy ERA5 NetCDF file for testing."""
+def create_dummy_era5_netcdf(
+    temp_dir,
+    variable_name="VAR_2T",
+    latitude_descending=True,
+    constant_value=None,
+):
+    """
+    Create a dummy ERA5 NetCDF file.
 
-    latitude = np.linspace(-90, 90, 10)
-    longitude = np.linspace(0, 350, 20)
-    time = pd.date_range("2020-01-01", periods=4, freq="6h")
+    Parameters
+    ----------
+    temp_dir : str or pathlib.Path
+        Directory in which the NetCDF file is created.
+    variable_name : str, default="VAR_2T"
+        Name of the climate variable.
+    latitude_descending : bool, default=True
+        Whether latitude is ordered north-to-south.
+    constant_value : float or None, optional
+        Constant value used for the field. If ``None``, deterministic random
+        values are generated.
 
-    data = np.random.randn(
-        len(time),
-        len(latitude),
-        len(longitude),
-    ).astype(np.float32)
+    Returns
+    -------
+    path : str
+        Path to the generated NetCDF file.
+    dataset : xarray.Dataset
+        Dataset written to disk.
+    """
+    if latitude_descending:
+        latitude = np.linspace(90.0, -90.0, 10)
+    else:
+        latitude = np.linspace(-90.0, 90.0, 10)
 
-    ds = xr.Dataset(
+    # Include negative longitudes to test normalization to [0, 360).
+    longitude = np.linspace(-180.0, 162.0, 20)
+    time = pd.date_range(
+        "2020-01-01",
+        periods=4,
+        freq="6h",
+    )
+
+    if constant_value is None:
+        rng = np.random.default_rng(10)
+        data = rng.standard_normal(
+            (
+                len(time),
+                len(latitude),
+                len(longitude),
+            )
+        ).astype(np.float32)
+    else:
+        data = np.full(
+            (
+                len(time),
+                len(latitude),
+                len(longitude),
+            ),
+            constant_value,
+            dtype=np.float32,
+        )
+
+    dataset = xr.Dataset(
         {
             variable_name: (
-                ("time", "latitude", "longitude"),
+                (
+                    "time",
+                    "latitude",
+                    "longitude",
+                ),
                 data,
             )
         },
@@ -59,104 +111,242 @@ def create_dummy_era5_netcdf(temp_dir, variable_name="tas"):
         },
     )
 
-    path = os.path.join(temp_dir, "era5.nc")
-    ds.to_netcdf(path)
+    path = os.path.join(
+        temp_dir,
+        "era5.nc",
+    )
+    dataset.to_netcdf(path)
 
-    return path, ds
+    return path, dataset
 
 
 def create_dummy_cmip6_netcdf(
     temp_dir,
-    variable_name="tas",
+    variable_name="VAR_2T",
     use_lat_lon=True,
+    constant_value=None,
 ):
-    """Create a dummy CMIP6 NetCDF file for testing."""
+    """
+    Create a dummy CMIP6 NetCDF file.
 
-    lat_name = "lat" if use_lat_lon else "latitude"
-    lon_name = "lon" if use_lat_lon else "longitude"
+    Parameters
+    ----------
+    temp_dir : str or pathlib.Path
+        Directory in which the NetCDF file is created.
+    variable_name : str, default="VAR_2T"
+        Name of the climate variable.
+    use_lat_lon : bool, default=True
+        Whether to use ``lat`` and ``lon`` instead of the standardized names.
+    constant_value : float or None, optional
+        Constant value used for the field. If ``None``, deterministic random
+        values are generated.
 
-    latitude = np.linspace(-90, 90, 6)
-    longitude = np.linspace(0, 300, 12)
-    time = pd.date_range("2020-01-01", periods=4, freq="6h")
+    Returns
+    -------
+    path : str
+        Path to the generated NetCDF file.
+    dataset : xarray.Dataset
+        Dataset written to disk.
+    """
+    latitude_name = "lat" if use_lat_lon else "latitude"
+    longitude_name = "lon" if use_lat_lon else "longitude"
 
-    data = np.random.randn(
-        len(time),
-        len(latitude),
-        len(longitude),
-    ).astype(np.float32)
+    latitude = np.linspace(-75.0, 75.0, 6)
+    longitude = np.linspace(0.0, 330.0, 12)
+    time = pd.date_range(
+        "2020-01-01",
+        periods=4,
+        freq="6h",
+    )
 
-    ds = xr.Dataset(
+    if constant_value is None:
+        rng = np.random.default_rng(20)
+        data = rng.standard_normal(
+            (
+                len(time),
+                len(latitude),
+                len(longitude),
+            )
+        ).astype(np.float32)
+    else:
+        data = np.full(
+            (
+                len(time),
+                len(latitude),
+                len(longitude),
+            ),
+            constant_value,
+            dtype=np.float32,
+        )
+
+    dataset = xr.Dataset(
         {
             variable_name: (
-                ("time", lat_name, lon_name),
+                (
+                    "time",
+                    latitude_name,
+                    longitude_name,
+                ),
                 data,
             )
         },
         coords={
             "time": time,
-            lat_name: latitude,
-            lon_name: longitude,
+            latitude_name: latitude,
+            longitude_name: longitude,
         },
     )
 
-    path = os.path.join(temp_dir, "cmip6.nc")
-    ds.to_netcdf(path)
+    path = os.path.join(
+        temp_dir,
+        "cmip6.nc",
+    )
+    dataset.to_netcdf(path)
 
-    return path, ds
+    return path, dataset
 
 
-def create_dummy_dataset_without_variable(
+def create_dataset_without_expected_variable(
     temp_dir,
     filename,
-    variable_name="wrong_var",
-    coord_names=("latitude", "longitude"),
+    coord_names,
 ):
-    """Create a dummy NetCDF file without the expected variable."""
+    """
+    Create a NetCDF file that does not contain the expected variable.
 
-    lat_name, lon_name = coord_names
+    Parameters
+    ----------
+    temp_dir : str or pathlib.Path
+        Directory in which the file is created.
+    filename : str
+        NetCDF filename.
+    coord_names : tuple of str
+        Latitude and longitude coordinate names.
 
-    latitude = np.linspace(-90, 90, 5)
-    longitude = np.linspace(0, 300, 8)
-    time = pd.date_range("2020-01-01", periods=2, freq="6h")
+    Returns
+    -------
+    str
+        Path to the generated NetCDF file.
+    """
+    latitude_name, longitude_name = coord_names
 
-    data = np.random.randn(
-        len(time),
-        len(latitude),
-        len(longitude),
-    ).astype(np.float32)
-
-    ds = xr.Dataset(
+    dataset = xr.Dataset(
         {
-            variable_name: (
-                ("time", lat_name, lon_name),
-                data,
+            "wrong_variable": (
+                (
+                    "time",
+                    latitude_name,
+                    longitude_name,
+                ),
+                np.zeros(
+                    (2, 4, 5),
+                    dtype=np.float32,
+                ),
             )
         },
         coords={
-            "time": time,
-            lat_name: latitude,
-            lon_name: longitude,
+            "time": pd.date_range(
+                "2020-01-01",
+                periods=2,
+                freq="6h",
+            ),
+            latitude_name: np.linspace(
+                -60.0,
+                60.0,
+                4,
+            ),
+            longitude_name: np.linspace(
+                0.0,
+                288.0,
+                5,
+            ),
         },
     )
 
-    path = os.path.join(temp_dir, filename)
-    ds.to_netcdf(path)
+    path = os.path.join(
+        temp_dir,
+        filename,
+    )
+    dataset.to_netcdf(path)
 
-    return path, ds
+    return path
 
 
 # ============================================================================
-# Unit Tests for ClimateDataset
+# Unit tests for resize_with_torchvision
+# ============================================================================
+
+
+class TestResizeWithTorchvision(unittest.TestCase):
+    """Unit tests for the torchvision spatial resizing helper."""
+
+    def test_resize_returns_requested_shape_and_float32(self):
+        """Test output shape and dtype."""
+        data = xr.DataArray(
+            np.arange(
+                2 * 4 * 6,
+                dtype=np.float32,
+            ).reshape(2, 4, 6),
+            dims=(
+                "time",
+                "latitude",
+                "longitude",
+            ),
+        )
+
+        resized = resize_with_torchvision(
+            data,
+            target_shape=(3, 5),
+        )
+
+        self.assertEqual(
+            resized.shape,
+            (2, 3, 5),
+        )
+        self.assertEqual(
+            resized.dtype,
+            np.dtype("float32"),
+        )
+
+    def test_resize_preserves_constant_field(self):
+        """Test that bilinear resizing preserves a constant field."""
+        data = xr.DataArray(
+            np.full(
+                (2, 8, 12),
+                280.0,
+                dtype=np.float32,
+            ),
+            dims=(
+                "time",
+                "latitude",
+                "longitude",
+            ),
+        )
+
+        resized = resize_with_torchvision(
+            data,
+            target_shape=(5, 7),
+        )
+
+        np.testing.assert_allclose(
+            resized,
+            280.0,
+            atol=1e-5,
+        )
+
+
+# ============================================================================
+# Unit tests for ClimateDataset
 # ============================================================================
 
 
 class TestClimateDataset(unittest.TestCase):
-    """Unit tests for ClimateDataset class."""
+    """Unit tests for the current ClimateDataset API."""
 
     def setUp(self):
-        """Set up test fixtures."""
-
+        """Create temporary input files and a logger."""
         self.temp_dir = tempfile.mkdtemp()
+        self.variable_name = "VAR_2T"
 
         self.logger = Logger(
             console_output=True,
@@ -165,394 +355,387 @@ class TestClimateDataset(unittest.TestCase):
             record=False,
         )
 
-        if self.logger:
-            self.logger.info(f"Test setup - created temp directory: {self.temp_dir}")
-
-        self.variable_name = "tas"
-
-        self.era5_path, self.era5_ds = create_dummy_era5_netcdf(
+        (
+            self.era5_path,
+            self.era5_dataset,
+        ) = create_dummy_era5_netcdf(
             self.temp_dir,
             variable_name=self.variable_name,
+            latitude_descending=True,
         )
 
-        self.cmip6_path, self.cmip6_ds = create_dummy_cmip6_netcdf(
+        (
+            self.cmip6_path,
+            self.cmip6_dataset,
+        ) = create_dummy_cmip6_netcdf(
             self.temp_dir,
             variable_name=self.variable_name,
             use_lat_lon=True,
         )
 
-        if self.logger:
-            self.logger.info("Test setup complete - ClimateDataset test fixtures ready")
-
     # ------------------------------------------------------------------------
-    # Initialization Tests
+    # Initialization and loading tests
     # ------------------------------------------------------------------------
 
-    def test_climate_dataset_initialization(self):
-        """Test ClimateDataset initialization."""
-
-        if self.logger:
-            self.logger.info("Testing ClimateDataset initialization")
-
+    def test_initialization(self):
+        """Test initialization of instance attributes."""
         dataset = ClimateDataset(
-            era5_path=self.era5_path,
             cmip6_path=self.cmip6_path,
             variable_name=self.variable_name,
+            era5_path=self.era5_path,
             logger=self.logger,
         )
 
-        self.assertEqual(dataset.era5_path, self.era5_path)
-        self.assertEqual(dataset.cmip6_path, self.cmip6_path)
-        self.assertEqual(dataset.variable_name, self.variable_name)
+        self.assertEqual(
+            dataset.era5_path,
+            self.era5_path,
+        )
+        self.assertEqual(
+            dataset.cmip6_path,
+            self.cmip6_path,
+        )
+        self.assertEqual(
+            dataset.variable_name,
+            self.variable_name,
+        )
         self.assertIsNone(dataset.era5)
         self.assertIsNone(dataset.cmip6)
         self.assertIsNone(dataset.era5_data)
         self.assertIsNone(dataset.cmip6_data)
+        self.assertIsNone(dataset.era5_lat_descending)
 
-        if self.logger:
-            self.logger.info("✅ ClimateDataset initialization test passed")
-
-    # ------------------------------------------------------------------------
-    # Load Method Tests
-    # ------------------------------------------------------------------------
-
-    def test_load_datasets_successfully(self):
-        """Test loading ERA5 and CMIP6 datasets."""
-
-        if self.logger:
-            self.logger.info("Testing dataset loading")
-
+    def test_load_era5_and_cmip6(self):
+        """Test the two current loading methods."""
         dataset = ClimateDataset(
+            cmip6_path=self.cmip6_path,
+            variable_name=self.variable_name,
             era5_path=self.era5_path,
-            cmip6_path=self.cmip6_path,
-            variable_name=self.variable_name,
-            logger=self.logger,
         )
 
-        dataset.load()
-
-        self.assertIsNotNone(dataset.era5)
-        self.assertIsNotNone(dataset.cmip6)
-
-        self.assertIn(self.variable_name, dataset.era5)
-        self.assertIn(self.variable_name, dataset.cmip6)
-
-        self.assertEqual(
-            dataset.era5[self.variable_name].shape,
-            self.era5_ds[self.variable_name].shape,
-        )
-
-        self.assertEqual(
-            dataset.cmip6[self.variable_name].shape,
-            self.cmip6_ds[self.variable_name].shape,
-        )
-
-        if self.logger:
-            self.logger.info("✅ Dataset loading test passed")
-
-    def test_load_raises_error_if_variable_missing_in_era5(self):
-        """Test load raises ValueError when variable is missing in ERA5."""
-
-        if self.logger:
-            self.logger.info("Testing missing variable in ERA5")
-
-        bad_era5_path, _ = create_dummy_dataset_without_variable(
-            self.temp_dir,
-            filename="bad_era5.nc",
-            variable_name="wrong_var",
-            coord_names=("latitude", "longitude"),
-        )
-
-        dataset = ClimateDataset(
-            era5_path=bad_era5_path,
-            cmip6_path=self.cmip6_path,
-            variable_name=self.variable_name,
-            logger=self.logger,
-        )
-
-        with self.assertRaises(ValueError) as context:
-            dataset.load()
+        dataset.load_era5()
+        dataset.load_cmip6()
 
         self.assertIn(
-            f"Variable '{self.variable_name}' not found in ERA5 dataset",
-            str(context.exception),
+            self.variable_name,
+            dataset.era5,
         )
-
-        if self.logger:
-            self.logger.info("✅ Missing variable in ERA5 test passed")
-
-    def test_load_raises_error_if_variable_missing_in_cmip6(self):
-        """Test load raises ValueError when variable is missing in CMIP6."""
-
-        if self.logger:
-            self.logger.info("Testing missing variable in CMIP6")
-
-        bad_cmip6_path, _ = create_dummy_dataset_without_variable(
-            self.temp_dir,
-            filename="bad_cmip6.nc",
-            variable_name="wrong_var",
-            coord_names=("lat", "lon"),
-        )
-
-        dataset = ClimateDataset(
-            era5_path=self.era5_path,
-            cmip6_path=bad_cmip6_path,
-            variable_name=self.variable_name,
-            logger=self.logger,
-        )
-
-        with self.assertRaises(ValueError) as context:
-            dataset.load()
-
         self.assertIn(
-            f"Variable '{self.variable_name}' not found in CMIP6 dataset",
-            str(context.exception),
+            self.variable_name,
+            dataset.cmip6,
         )
 
-        if self.logger:
-            self.logger.info("✅ Missing variable in CMIP6 test passed")
+        dataset.close()
 
-    # ------------------------------------------------------------------------
-    # Coordinate Renaming Tests
-    # ------------------------------------------------------------------------
-
-    def test_rename_cmip6_coordinates_from_lat_lon(self):
-        """Test CMIP6 coordinate renaming from lat/lon to latitude/longitude."""
-
-        if self.logger:
-            self.logger.info("Testing CMIP6 coordinate renaming")
-
+    def test_load_era5_requires_path(self):
+        """Test rejection of ERA5 loading without an ERA5 path."""
         dataset = ClimateDataset(
-            era5_path=self.era5_path,
             cmip6_path=self.cmip6_path,
             variable_name=self.variable_name,
-            logger=self.logger,
         )
 
-        dataset.load()
+        with self.assertRaisesRegex(
+            ValueError,
+            "era5_path is required",
+        ):
+            dataset.load_era5()
 
-        self.assertIn("lat", dataset.cmip6.coords)
-        self.assertIn("lon", dataset.cmip6.coords)
-
-        dataset.rename_cmip6_coordinates()
-
-        self.assertIn("latitude", dataset.cmip6.coords)
-        self.assertIn("longitude", dataset.cmip6.coords)
-        self.assertNotIn("lat", dataset.cmip6.coords)
-        self.assertNotIn("lon", dataset.cmip6.coords)
-
-        if self.logger:
-            self.logger.info("✅ CMIP6 coordinate renaming test passed")
-
-    def test_rename_cmip6_coordinates_when_already_standard(self):
-        """Test coordinate renaming when CMIP6 coordinates already match ERA5."""
-
-        if self.logger:
-            self.logger.info("Testing CMIP6 coordinates already standardized")
-
-        cmip6_standard_path, _ = create_dummy_cmip6_netcdf(
+    def test_load_era5_rejects_missing_variable(self):
+        """Test rejection of an ERA5 file missing the requested variable."""
+        bad_path = create_dataset_without_expected_variable(
             self.temp_dir,
-            variable_name=self.variable_name,
-            use_lat_lon=False,
+            "bad_era5.nc",
+            (
+                "latitude",
+                "longitude",
+            ),
         )
 
         dataset = ClimateDataset(
-            era5_path=self.era5_path,
-            cmip6_path=cmip6_standard_path,
+            cmip6_path=self.cmip6_path,
             variable_name=self.variable_name,
-            logger=self.logger,
+            era5_path=bad_path,
         )
 
-        dataset.load()
-        dataset.rename_cmip6_coordinates()
+        with self.assertRaisesRegex(
+            ValueError,
+            "not found in ERA5 dataset",
+        ):
+            dataset.load_era5()
 
-        self.assertIn("latitude", dataset.cmip6.coords)
-        self.assertIn("longitude", dataset.cmip6.coords)
+        dataset.close()
 
-        if self.logger:
-            self.logger.info("✅ Already standardized coordinates test passed")
+    def test_load_cmip6_rejects_missing_variable(self):
+        """Test rejection of a CMIP6 file missing the requested variable."""
+        bad_path = create_dataset_without_expected_variable(
+            self.temp_dir,
+            "bad_cmip6.nc",
+            (
+                "lat",
+                "lon",
+            ),
+        )
+
+        dataset = ClimateDataset(
+            cmip6_path=bad_path,
+            variable_name=self.variable_name,
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "not found in CMIP6 dataset",
+        ):
+            dataset.load_cmip6()
+
+        dataset.close()
 
     # ------------------------------------------------------------------------
-    # Longitude Cyclic Tests
+    # Coordinate helper tests
     # ------------------------------------------------------------------------
 
-    def test_make_longitude_cyclic(self):
-        """Test that cyclic longitude point is added correctly."""
+    def test_rename_coordinates(self):
+        """Test renaming from lat/lon to latitude/longitude."""
+        renamed = ClimateDataset.rename_coordinates(self.cmip6_dataset)
 
-        if self.logger:
-            self.logger.info("Testing make_longitude_cyclic")
+        self.assertIn(
+            "latitude",
+            renamed.coords,
+        )
+        self.assertIn(
+            "longitude",
+            renamed.coords,
+        )
+        self.assertNotIn(
+            "lat",
+            renamed.coords,
+        )
+        self.assertNotIn(
+            "lon",
+            renamed.coords,
+        )
 
-        latitude = np.linspace(-90, 90, 4)
-        longitude = np.array([0, 90, 180, 270])
-
-        values = np.random.randn(
-            len(latitude),
-            len(longitude),
-        ).astype(np.float32)
-
-        da = xr.DataArray(
-            values,
-            dims=("latitude", "longitude"),
+    def test_is_latitude_descending(self):
+        """Test detection of latitude orientation."""
+        descending = xr.Dataset(
             coords={
-                "latitude": latitude,
-                "longitude": longitude,
+                "latitude": [60.0, 0.0, -60.0],
+            }
+        )
+        ascending = xr.Dataset(
+            coords={
+                "latitude": [-60.0, 0.0, 60.0],
+            }
+        )
+
+        self.assertTrue(ClimateDataset.is_latitude_descending(descending))
+        self.assertFalse(ClimateDataset.is_latitude_descending(ascending))
+
+    def test_normalize_longitudes_sorts_and_removes_duplicates(self):
+        """Test longitude normalization and duplicate removal."""
+        dataset = xr.Dataset(
+            {
+                self.variable_name: (
+                    (
+                        "latitude",
+                        "longitude",
+                    ),
+                    np.arange(
+                        10,
+                        dtype=np.float32,
+                    ).reshape(2, 5),
+                )
+            },
+            coords={
+                "latitude": [-30.0, 30.0],
+                "longitude": [
+                    -180.0,
+                    0.0,
+                    180.0,
+                    360.0,
+                    90.0,
+                ],
             },
         )
 
-        da_ext = ClimateDataset.make_longitude_cyclic(da)
+        normalized = ClimateDataset.normalize_longitudes(dataset)
 
+        longitude = normalized["longitude"].values
+
+        self.assertTrue(np.all(longitude >= 0.0))
+        self.assertTrue(np.all(longitude < 360.0))
+        self.assertTrue(np.all(np.diff(longitude) > 0.0))
         self.assertEqual(
-            da_ext.sizes["longitude"],
-            da.sizes["longitude"] + 1,
+            len(longitude),
+            len(np.unique(longitude)),
+        )
+        np.testing.assert_allclose(
+            longitude,
+            np.array([0.0, 90.0, 180.0]),
         )
 
-        self.assertEqual(
-            da_ext["longitude"].values[-1],
-            da["longitude"].values[0] + 360,
+    def test_sort_latitude(self):
+        """Test ascending and descending latitude sorting."""
+        dataset = xr.Dataset(
+            coords={
+                "latitude": [
+                    0.0,
+                    -30.0,
+                    30.0,
+                ],
+                "longitude": [0.0],
+            }
+        )
+
+        ascending = ClimateDataset.sort_latitude(
+            dataset,
+            descending=False,
+        )
+        descending = ClimateDataset.sort_latitude(
+            dataset,
+            descending=True,
         )
 
         np.testing.assert_allclose(
-            da_ext.isel(longitude=-1).values,
-            da.isel(longitude=0).values,
+            ascending["latitude"].values,
+            [-30.0, 0.0, 30.0],
         )
-
-        if self.logger:
-            self.logger.info("✅ make_longitude_cyclic test passed")
-
-    # ------------------------------------------------------------------------
-    # Interpolation Tests
-    # ------------------------------------------------------------------------
-
-    def test_interpolate_cmip6(self):
-        """Test CMIP6 interpolation onto ERA5 grid."""
-
-        if self.logger:
-            self.logger.info("Testing CMIP6 interpolation onto ERA5 grid")
-
-        dataset = ClimateDataset(
-            era5_path=self.era5_path,
-            cmip6_path=self.cmip6_path,
-            variable_name=self.variable_name,
-            logger=self.logger,
-        )
-
-        dataset.load()
-        dataset.rename_cmip6_coordinates()
-        dataset.interpolate_cmip6()
-
-        self.assertIsNotNone(dataset.era5_data)
-        self.assertIsNotNone(dataset.cmip6_data)
-
-        self.assertEqual(
-            dataset.era5_data.sizes["latitude"],
-            self.era5_ds.sizes["latitude"],
-        )
-
-        self.assertEqual(
-            dataset.era5_data.sizes["longitude"],
-            self.era5_ds.sizes["longitude"],
-        )
-
-        self.assertEqual(
-            dataset.cmip6_data.sizes["latitude"],
-            self.era5_ds.sizes["latitude"],
-        )
-
-        self.assertEqual(
-            dataset.cmip6_data.sizes["longitude"],
-            self.era5_ds.sizes["longitude"],
-        )
-
-        self.assertEqual(
-            dataset.cmip6_data.shape,
-            dataset.era5_data.shape,
-        )
-
-        if self.logger:
-            self.logger.info(
-                f"✅ CMIP6 interpolation test passed - shape: "
-                f"{dataset.cmip6_data.shape}"
-            )
-
-    def test_interpolate_cmip6_matches_era5_coordinates(self):
-        """Test interpolated CMIP6 data uses ERA5 coordinates."""
-
-        if self.logger:
-            self.logger.info("Testing interpolated coordinate alignment")
-
-        dataset = ClimateDataset(
-            era5_path=self.era5_path,
-            cmip6_path=self.cmip6_path,
-            variable_name=self.variable_name,
-            logger=self.logger,
-        )
-
-        dataset.load()
-        dataset.rename_cmip6_coordinates()
-        dataset.interpolate_cmip6()
-
         np.testing.assert_allclose(
-            dataset.cmip6_data["latitude"].values,
-            dataset.era5["latitude"].values,
+            descending["latitude"].values,
+            [30.0, 0.0, -30.0],
+        )
+
+    def test_standardize_coordinates(self):
+        """Test coordinate renaming, longitude normalization, and sorting."""
+        standardized = ClimateDataset.standardize_coordinates(
+            self.cmip6_dataset,
+            latitude_descending=True,
+        )
+
+        self.assertIn(
+            "latitude",
+            standardized.coords,
+        )
+        self.assertIn(
+            "longitude",
+            standardized.coords,
+        )
+        self.assertGreater(
+            standardized["latitude"].values[0],
+            standardized["latitude"].values[-1],
+        )
+        self.assertTrue(np.all(standardized["longitude"].values >= 0.0))
+        self.assertTrue(np.all(standardized["longitude"].values < 360.0))
+
+    # ------------------------------------------------------------------------
+    # Full preparation pipeline tests
+    # ------------------------------------------------------------------------
+
+    def test_prepare_dataset_with_era5(self):
+        """Test ERA5 resizing onto the native CMIP6 grid."""
+        dataset = ClimateDataset(
+            cmip6_path=self.cmip6_path,
+            variable_name=self.variable_name,
+            era5_path=self.era5_path,
+            logger=self.logger,
+        )
+
+        (
+            era5_on_cmip6,
+            cmip6_native,
+            latitude_descending,
+        ) = dataset.prepare_dataset()
+
+        self.assertTrue(latitude_descending)
+
+        self.assertEqual(
+            era5_on_cmip6.dims,
+            (
+                "time",
+                "latitude",
+                "longitude",
+            ),
+        )
+        self.assertEqual(
+            cmip6_native.dims,
+            (
+                "time",
+                "latitude",
+                "longitude",
+            ),
+        )
+
+        # Both arrays must use the native CMIP6 spatial grid.
+        self.assertEqual(
+            era5_on_cmip6.shape,
+            cmip6_native.shape,
+        )
+        self.assertEqual(
+            era5_on_cmip6.sizes["latitude"],
+            self.cmip6_dataset.sizes["lat"],
+        )
+        self.assertEqual(
+            era5_on_cmip6.sizes["longitude"],
+            self.cmip6_dataset.sizes["lon"],
         )
 
         np.testing.assert_allclose(
-            dataset.cmip6_data["longitude"].values,
-            dataset.era5["longitude"].values,
+            era5_on_cmip6["latitude"].values,
+            cmip6_native["latitude"].values,
+        )
+        np.testing.assert_allclose(
+            era5_on_cmip6["longitude"].values,
+            cmip6_native["longitude"].values,
+        )
+        np.testing.assert_array_equal(
+            era5_on_cmip6["time"].values,
+            self.era5_dataset["time"].values,
         )
 
-        if self.logger:
-            self.logger.info("✅ Interpolated coordinate alignment test passed")
+        self.assertGreater(
+            era5_on_cmip6["latitude"].values[0],
+            era5_on_cmip6["latitude"].values[-1],
+        )
 
-    # ------------------------------------------------------------------------
-    # Full Pipeline Tests
-    # ------------------------------------------------------------------------
+        self.assertIs(
+            dataset.era5_data,
+            era5_on_cmip6,
+        )
+        self.assertIs(
+            dataset.cmip6_data,
+            cmip6_native,
+        )
 
-    def test_prepare_pipeline(self):
-        """Test complete ClimateDataset preparation pipeline."""
+        dataset.close()
 
-        if self.logger:
-            self.logger.info("Testing full prepare pipeline")
-
+    def test_prepare_dataset_without_era5_requires_orientation(self):
+        """Test that CMIP6-only mode requires latitude orientation."""
         dataset = ClimateDataset(
-            era5_path=self.era5_path,
             cmip6_path=self.cmip6_path,
             variable_name=self.variable_name,
-            logger=self.logger,
         )
 
-        dataset.prepare()
+        with self.assertRaisesRegex(
+            ValueError,
+            "latitude_descending is required",
+        ):
+            dataset.prepare_dataset()
 
-        self.assertIsNotNone(dataset.era5)
-        self.assertIsNotNone(dataset.cmip6)
-        self.assertIsNotNone(dataset.era5_data)
-        self.assertIsNotNone(dataset.cmip6_data)
-
-        self.assertIn("latitude", dataset.cmip6.coords)
-        self.assertIn("longitude", dataset.cmip6.coords)
-
-        self.assertEqual(
-            dataset.cmip6_data.shape,
-            dataset.era5_data.shape,
-        )
-
-        if self.logger:
-            self.logger.info("✅ Full prepare pipeline test passed")
-
-    def test_prepare_pipeline_without_logger(self):
-        """Test complete pipeline when logger is None."""
-
+    def test_prepare_dataset_without_logger(self):
+        """Test the full ERA5-CMIP6 mode without a logger."""
         dataset = ClimateDataset(
-            era5_path=self.era5_path,
             cmip6_path=self.cmip6_path,
             variable_name=self.variable_name,
+            era5_path=self.era5_path,
             logger=None,
         )
 
-        dataset.prepare()
+        era5_on_cmip6, cmip6_native, _ = dataset.prepare_dataset()
 
-        self.assertIsNotNone(dataset.era5_data)
-        self.assertIsNotNone(dataset.cmip6_data)
+        self.assertEqual(
+            era5_on_cmip6.shape,
+            cmip6_native.shape,
+        )
+
+        dataset.close()
 
     # ------------------------------------------------------------------------
     # Cleanup
@@ -561,6 +744,9 @@ class TestClimateDataset(unittest.TestCase):
     def tearDown(self):
         """Clean up after tests."""
 
+        # Close the datasets returned by helper functions before deleting files.
+        self.era5_dataset.close()
+        self.cmip6_dataset.close()
         shutil.rmtree(self.temp_dir)
 
         if self.logger:
@@ -573,6 +759,7 @@ def run_tests():
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
 
+    suite.addTests(loader.loadTestsFromTestCase(TestResizeWithTorchvision))
     suite.addTests(loader.loadTestsFromTestCase(TestClimateDataset))
 
     runner = unittest.TextTestRunner(verbosity=2)

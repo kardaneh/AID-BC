@@ -8,6 +8,7 @@ Prerequisites
 
 - Python 3.8 or higher
 - Git (for cloning the repository)
+- curl (for installing ``uv``)
 
 Quick Install
 -------------
@@ -19,14 +20,27 @@ Quick Install
    git clone https://github.com/kardaneh/AID-BC.git
    cd AID-BC
 
-2. Create and activate a virtual environment:
+2. Install ``uv``:
+
+.. code-block:: bash
+
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   source ~/.bashrc
+
+Verify that ``uv`` is available:
+
+.. code-block:: bash
+
+   uv --version
+
+3. Create and activate a virtual environment:
 
 .. code-block:: bash
 
    uv venv --python=python3.11
    source .venv/bin/activate
 
-3. Install the package in development mode:
+4. Install the package in development mode:
 
 .. code-block:: bash
 

@@ -45,7 +45,7 @@ Recommended Workflow
    .. code-block:: bash
 
       python -m unittest \
-          tests.test_dataset.TestClimateDataset.test_prepare_pipeline
+          tests.test_dataset.TestClimateDataset.test_prepare_dataset_with_era5
 
 
 Test Coverage

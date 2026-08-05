@@ -6,9 +6,10 @@
 # To view a copy of this license, visit
 # http://creativecommons.org/licenses/by-nc-sa/4.0/
 
+import json
 import os
-import sys
 import shutil
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -23,41 +24,78 @@ sys.path.insert(
 )
 
 from AID_BC.logger import Logger
-from AID_BC.preprocess import build_paths, preprocess_year, main
+from AID_BC.preprocess import build_path, process_year, main
 
 
 # python -m unittest tests.test_preprocess
 
 
 # ============================================================================
-# Test Utilities
+# Test utilities
 # ============================================================================
 
 
 def create_yearly_dummy_era5_netcdf(
     root_dir,
     year,
-    variable_name="tas",
+    variable_name="VAR_2T",
     n_time=4,
+    latitude_descending=True,
 ):
-    """Create a yearly dummy ERA5 NetCDF file."""
+    """
+    Create a yearly dummy ERA5 NetCDF file.
 
+    Parameters
+    ----------
+    root_dir : str or pathlib.Path
+        Directory in which the file is created.
+    year : int
+        Year used in the output filename and time coordinate.
+    variable_name : str, default="VAR_2T"
+        Name of the ERA5 variable.
+    n_time : int, default=4
+        Number of six-hourly time steps.
+    latitude_descending : bool, default=True
+        Whether the ERA5 latitude coordinate is stored north-to-south.
+
+    Returns
+    -------
+    path : str
+        Path to the generated NetCDF file.
+    dataset : xarray.Dataset
+        In-memory dataset used to write the file.
+    """
     os.makedirs(root_dir, exist_ok=True)
 
-    latitude = np.linspace(-90, 90, 10)
-    longitude = np.linspace(0, 350, 20)
-    time = pd.date_range(f"{year}-01-01", periods=n_time, freq="6h")
+    if latitude_descending:
+        latitude = np.linspace(90.0, -90.0, 10)
+    else:
+        latitude = np.linspace(-90.0, 90.0, 10)
 
-    data = np.random.randn(
-        len(time),
-        len(latitude),
-        len(longitude),
+    longitude = np.linspace(0.0, 342.0, 20)
+    time = pd.date_range(
+        f"{year}-01-01",
+        periods=n_time,
+        freq="6h",
+    )
+
+    rng = np.random.default_rng(year)
+    data = rng.standard_normal(
+        (
+            len(time),
+            len(latitude),
+            len(longitude),
+        )
     ).astype(np.float32)
 
-    ds = xr.Dataset(
+    dataset = xr.Dataset(
         {
             variable_name: (
-                ("time", "latitude", "longitude"),
+                (
+                    "time",
+                    "latitude",
+                    "longitude",
+                ),
                 data,
             )
         },
@@ -68,67 +106,105 @@ def create_yearly_dummy_era5_netcdf(
         },
     )
 
-    path = os.path.join(root_dir, f"samples_{year}.nc")
-    ds.to_netcdf(path)
+    path = os.path.join(
+        root_dir,
+        f"samples_{year}.nc",
+    )
+    dataset.to_netcdf(path)
 
-    return path, ds
+    return path, dataset
 
 
 def create_yearly_dummy_cmip6_netcdf(
     root_dir,
     year,
-    variable_name="tas",
+    variable_name="VAR_2T",
     n_time=4,
     use_lat_lon=True,
 ):
-    """Create a yearly dummy CMIP6 NetCDF file."""
+    """
+    Create a yearly dummy CMIP6 NetCDF file.
 
+    Parameters
+    ----------
+    root_dir : str or pathlib.Path
+        Directory in which the file is created.
+    year : int
+        Year used in the output filename and time coordinate.
+    variable_name : str, default="VAR_2T"
+        Name of the CMIP6 variable.
+    n_time : int, default=4
+        Number of six-hourly time steps.
+    use_lat_lon : bool, default=True
+        If ``True``, use CMIP-style ``lat`` and ``lon`` coordinate names.
+        Otherwise, use ``latitude`` and ``longitude``.
+
+    Returns
+    -------
+    path : str
+        Path to the generated NetCDF file.
+    dataset : xarray.Dataset
+        In-memory dataset used to write the file.
+    """
     os.makedirs(root_dir, exist_ok=True)
 
-    lat_name = "lat" if use_lat_lon else "latitude"
-    lon_name = "lon" if use_lat_lon else "longitude"
+    latitude_name = "lat" if use_lat_lon else "latitude"
+    longitude_name = "lon" if use_lat_lon else "longitude"
 
-    latitude = np.linspace(-90, 90, 6)
-    longitude = np.linspace(0, 300, 12)
-    time = pd.date_range(f"{year}-01-01", periods=n_time, freq="6h")
+    latitude = np.linspace(-75.0, 75.0, 6)
+    longitude = np.linspace(0.0, 330.0, 12)
+    time = pd.date_range(
+        f"{year}-01-01",
+        periods=n_time,
+        freq="6h",
+    )
 
-    data = np.random.randn(
-        len(time),
-        len(latitude),
-        len(longitude),
+    rng = np.random.default_rng(year + 1000)
+    data = rng.standard_normal(
+        (
+            len(time),
+            len(latitude),
+            len(longitude),
+        )
     ).astype(np.float32)
 
-    ds = xr.Dataset(
+    dataset = xr.Dataset(
         {
             variable_name: (
-                ("time", lat_name, lon_name),
+                (
+                    "time",
+                    latitude_name,
+                    longitude_name,
+                ),
                 data,
             )
         },
         coords={
             "time": time,
-            lat_name: latitude,
-            lon_name: longitude,
+            latitude_name: latitude,
+            longitude_name: longitude,
         },
     )
 
-    path = os.path.join(root_dir, f"samples_{year}.nc")
-    ds.to_netcdf(path)
+    path = os.path.join(
+        root_dir,
+        f"samples_{year}.nc",
+    )
+    dataset.to_netcdf(path)
 
-    return path, ds
+    return path, dataset
 
 
 # ============================================================================
-# Unit Tests for preprocess.py
+# Unit tests for preprocess.py
 # ============================================================================
 
 
 class TestPreprocess(unittest.TestCase):
-    """Unit tests for preprocess."""
+    """Unit tests for the ERA5-on-CMIP6 preprocessing module."""
 
     def setUp(self):
-        """Set up test fixtures."""
-
+        """Create temporary directories and a test logger."""
         self.temp_dir = tempfile.mkdtemp()
 
         self.era5_root = os.path.join(
@@ -141,13 +217,12 @@ class TestPreprocess(unittest.TestCase):
             "cmip6",
         )
 
-        self.output_zarr = os.path.join(
+        self.output_dir = os.path.join(
             self.temp_dir,
-            "output",
-            "cmip6_test.zarr",
+            "era5_on_cmip6",
         )
 
-        self.variable_name = "tas"
+        self.variable_name = "VAR_2T"
 
         self.logger = Logger(
             console_output=True,
@@ -156,54 +231,46 @@ class TestPreprocess(unittest.TestCase):
             record=False,
         )
 
-        if self.logger:
-            self.logger.info(f"Test setup - created temp directory: {self.temp_dir}")
+        self.logger.info(f"Test setup - created temporary directory: {self.temp_dir}")
 
     # ------------------------------------------------------------------------
-    # Path Tests
+    # Path tests
     # ------------------------------------------------------------------------
 
-    def test_build_paths(self):
-        """Test yearly ERA5 and CMIP6 path construction."""
-
-        year = 2020
-
-        era5_path, cmip6_path = build_paths(
-            year=year,
-            era5_root=self.era5_root,
-            cmip6_root=self.cmip6_root,
+    def test_build_path(self):
+        """Test yearly NetCDF path construction."""
+        path = build_path(
+            self.era5_root,
+            2020,
         )
 
         self.assertEqual(
-            era5_path,
-            os.path.join(self.era5_root, "samples_2020.nc"),
+            path,
+            os.path.join(
+                self.era5_root,
+                "samples_2020.nc",
+            ),
         )
 
-        self.assertEqual(
-            cmip6_path,
-            os.path.join(self.cmip6_root, "samples_2020.nc"),
-        )
-
-        if self.logger:
-            self.logger.info("✅ build_paths test passed")
-
     # ------------------------------------------------------------------------
-    # preprocess_year Tests
+    # process_year tests
     # ------------------------------------------------------------------------
 
-    def test_preprocess_year_returns_interpolated_dataarray(self):
-        """Test preprocessing one CMIP6 year onto the ERA5 grid."""
-
+    def test_process_year_writes_era5_on_cmip6_file(self):
+        """
+        Test preprocessing and writing one ERA5-on-CMIP6 yearly file.
+        """
         year = 2020
 
-        _, era5_ds = create_yearly_dummy_era5_netcdf(
+        _, era5_dataset = create_yearly_dummy_era5_netcdf(
             root_dir=self.era5_root,
             year=year,
             variable_name=self.variable_name,
             n_time=4,
+            latitude_descending=True,
         )
 
-        create_yearly_dummy_cmip6_netcdf(
+        _, cmip6_dataset = create_yearly_dummy_cmip6_netcdf(
             root_dir=self.cmip6_root,
             year=year,
             variable_name=self.variable_name,
@@ -211,139 +278,192 @@ class TestPreprocess(unittest.TestCase):
             use_lat_lon=True,
         )
 
-        da = preprocess_year(
+        latitude_descending = process_year(
             year=year,
             era5_root=self.era5_root,
             cmip6_root=self.cmip6_root,
             variable_name=self.variable_name,
+            output_dir=self.output_dir,
             logger=self.logger,
         )
 
-        self.assertEqual(
-            da.name,
-            self.variable_name,
+        output_file = os.path.join(
+            self.output_dir,
+            f"samples_{year}.nc",
         )
 
-        self.assertEqual(
-            da.dtype,
-            np.float32,
-        )
+        self.assertTrue(latitude_descending)
+        self.assertTrue(os.path.isfile(output_file))
 
-        self.assertEqual(
-            da.dims,
-            ("time", "latitude", "longitude"),
-        )
+        with xr.open_dataset(output_file) as output_dataset:
+            self.assertIn(
+                self.variable_name,
+                output_dataset.data_vars,
+            )
 
-        self.assertEqual(
-            da.sizes["time"],
-            era5_ds.sizes["time"],
-        )
+            output = output_dataset[self.variable_name]
 
-        self.assertEqual(
-            da.sizes["latitude"],
-            era5_ds.sizes["latitude"],
-        )
+            self.assertEqual(
+                output.dtype,
+                np.dtype("float32"),
+            )
 
-        self.assertEqual(
-            da.sizes["longitude"],
-            era5_ds.sizes["longitude"],
-        )
+            self.assertEqual(
+                output.dims,
+                (
+                    "time",
+                    "latitude",
+                    "longitude",
+                ),
+            )
 
-        np.testing.assert_allclose(
-            da["latitude"].values,
-            era5_ds["latitude"].values,
-        )
+            # Time comes from ERA5, while the spatial shape comes from CMIP6.
+            self.assertEqual(
+                output.sizes["time"],
+                era5_dataset.sizes["time"],
+            )
+            self.assertEqual(
+                output.sizes["latitude"],
+                cmip6_dataset.sizes["lat"],
+            )
+            self.assertEqual(
+                output.sizes["longitude"],
+                cmip6_dataset.sizes["lon"],
+            )
 
-        np.testing.assert_allclose(
-            da["longitude"].values,
-            era5_ds["longitude"].values,
-        )
+            # The CMIP6 grid is reordered to match the original ERA5
+            # north-to-south latitude convention.
+            expected_latitude = np.sort(cmip6_dataset["lat"].values)[::-1]
 
-        if self.logger:
-            self.logger.info(f"✅ preprocess_year test passed - shape: {da.shape}")
+            np.testing.assert_allclose(
+                output["latitude"].values,
+                expected_latitude,
+            )
 
-    # ------------------------------------------------------------------------
-    # main() Tests
-    # ------------------------------------------------------------------------
+            np.testing.assert_allclose(
+                output["longitude"].values,
+                np.sort(cmip6_dataset["lon"].values % 360.0),
+            )
 
-    def test_main_writes_single_year_zarr(self):
-        """Test that main writes one preprocessed year to a Zarr store."""
+            np.testing.assert_array_equal(
+                output["time"].values,
+                era5_dataset["time"].values,
+            )
 
+    def test_process_year_returns_false_for_ascending_era5_latitude(self):
+        """Test detection of ascending ERA5 latitude coordinates."""
         year = 2020
 
         create_yearly_dummy_era5_netcdf(
             root_dir=self.era5_root,
             year=year,
             variable_name=self.variable_name,
-            n_time=4,
+            latitude_descending=False,
         )
 
         create_yearly_dummy_cmip6_netcdf(
             root_dir=self.cmip6_root,
             year=year,
             variable_name=self.variable_name,
-            n_time=4,
-            use_lat_lon=True,
+        )
+
+        latitude_descending = process_year(
+            year=year,
+            era5_root=self.era5_root,
+            cmip6_root=self.cmip6_root,
+            variable_name=self.variable_name,
+            output_dir=self.output_dir,
+            logger=self.logger,
+        )
+
+        self.assertFalse(latitude_descending)
+
+    # ------------------------------------------------------------------------
+    # main tests
+    # ------------------------------------------------------------------------
+
+    def test_main_writes_single_year_netcdf_and_metadata(self):
+        """Test one-year preprocessing through the command-line entry point."""
+        year = 2020
+
+        create_yearly_dummy_era5_netcdf(
+            root_dir=self.era5_root,
+            year=year,
+            variable_name=self.variable_name,
+            latitude_descending=True,
+        )
+
+        create_yearly_dummy_cmip6_netcdf(
+            root_dir=self.cmip6_root,
+            year=year,
+            variable_name=self.variable_name,
         )
 
         test_args = [
             "preprocess.py",
-            "--start_year",
-            str(year),
-            "--end_year",
-            str(year),
-            "--variable",
-            self.variable_name,
             "--era5_root",
             self.era5_root,
             "--cmip6_root",
             self.cmip6_root,
-            "--output_zarr",
-            self.output_zarr,
-            "--time_chunk",
-            "4",
-            "--lat_chunk",
-            "5",
-            "--lon_chunk",
-            "10",
-            "--overwrite",
+            "--variable",
+            self.variable_name,
+            "--start_year",
+            str(year),
+            "--end_year",
+            str(year),
+            "--output_dir",
+            self.output_dir,
         ]
 
-        with patch.object(sys, "argv", test_args):
+        with patch.object(
+            sys,
+            "argv",
+            test_args,
+        ):
             main()
 
-        self.assertTrue(os.path.exists(self.output_zarr))
+        output_file = os.path.join(
+            self.output_dir,
+            f"samples_{year}.nc",
+        )
+        metadata_file = os.path.join(
+            self.output_dir,
+            "metadata.json",
+        )
 
-        ds = xr.open_zarr(self.output_zarr)
+        self.assertTrue(os.path.isfile(output_file))
+        self.assertTrue(os.path.isfile(metadata_file))
 
-        self.assertIn(
+        with open(
+            metadata_file,
+            encoding="utf-8",
+        ) as handle:
+            metadata = json.load(handle)
+
+        self.assertEqual(
+            metadata["variable_name"],
             self.variable_name,
-            ds.data_vars,
         )
-
-        da = ds[self.variable_name]
-
+        self.assertTrue(metadata["latitude_descending"])
         self.assertEqual(
-            da.shape,
-            (4, 10, 20),
+            metadata["source_era5_root"],
+            self.era5_root,
         )
-
         self.assertEqual(
-            da.dtype,
-            np.float32,
+            metadata["source_cmip6_root"],
+            self.cmip6_root,
         )
-
         self.assertEqual(
-            da.dims,
-            ("time", "latitude", "longitude"),
+            metadata["start_year"],
+            year,
+        )
+        self.assertEqual(
+            metadata["end_year"],
+            year,
         )
 
-        if self.logger:
-            self.logger.info("✅ main single-year Zarr test passed")
-
-    def test_main_appends_multiple_years_to_zarr(self):
-        """Test that main appends multiple years along the time dimension."""
-
+    def test_main_writes_one_netcdf_file_per_year(self):
+        """Test that multiple years are written as separate NetCDF files."""
         years = [2020, 2021]
 
         for year in years:
@@ -351,135 +471,124 @@ class TestPreprocess(unittest.TestCase):
                 root_dir=self.era5_root,
                 year=year,
                 variable_name=self.variable_name,
-                n_time=4,
+                latitude_descending=True,
             )
 
             create_yearly_dummy_cmip6_netcdf(
                 root_dir=self.cmip6_root,
                 year=year,
                 variable_name=self.variable_name,
-                n_time=4,
-                use_lat_lon=True,
             )
 
         test_args = [
             "preprocess.py",
+            "--era5_root",
+            self.era5_root,
+            "--cmip6_root",
+            self.cmip6_root,
+            "--variable",
+            self.variable_name,
+            "--start_year",
+            str(years[0]),
+            "--end_year",
+            str(years[-1]),
+            "--output_dir",
+            self.output_dir,
+        ]
+
+        with patch.object(
+            sys,
+            "argv",
+            test_args,
+        ):
+            main()
+
+        for year in years:
+            output_file = os.path.join(
+                self.output_dir,
+                f"samples_{year}.nc",
+            )
+            self.assertTrue(os.path.isfile(output_file))
+
+            with xr.open_dataset(output_file) as dataset:
+                self.assertEqual(
+                    dataset[self.variable_name].sizes["time"],
+                    4,
+                )
+                self.assertEqual(
+                    str(dataset["time"].values[0])[:10],
+                    f"{year}-01-01",
+                )
+
+        metadata_file = os.path.join(
+            self.output_dir,
+            "metadata.json",
+        )
+
+        with open(
+            metadata_file,
+            encoding="utf-8",
+        ) as handle:
+            metadata = json.load(handle)
+
+        self.assertEqual(
+            metadata["start_year"],
+            years[0],
+        )
+        self.assertEqual(
+            metadata["end_year"],
+            years[-1],
+        )
+
+    def test_main_raises_if_latitude_orientation_changes(self):
+        """
+        Test rejection of inconsistent ERA5 latitude ordering across years.
+        """
+        test_args = [
+            "preprocess.py",
+            "--era5_root",
+            self.era5_root,
+            "--cmip6_root",
+            self.cmip6_root,
+            "--variable",
+            self.variable_name,
             "--start_year",
             "2020",
             "--end_year",
             "2021",
-            "--variable",
-            self.variable_name,
-            "--era5_root",
-            self.era5_root,
-            "--cmip6_root",
-            self.cmip6_root,
-            "--output_zarr",
-            self.output_zarr,
-            "--time_chunk",
-            "4",
-            "--lat_chunk",
-            "5",
-            "--lon_chunk",
-            "10",
-            "--overwrite",
+            "--output_dir",
+            self.output_dir,
         ]
 
-        with patch.object(sys, "argv", test_args):
-            main()
-
-        ds = xr.open_zarr(self.output_zarr)
-
-        da = ds[self.variable_name]
-
-        self.assertEqual(
-            da.shape,
-            (8, 10, 20),
-        )
-
-        self.assertEqual(
-            da.sizes["time"],
-            8,
-        )
-
-        self.assertEqual(
-            str(da["time"].values[0])[:10],
-            "2020-01-01",
-        )
-
-        self.assertEqual(
-            str(da["time"].values[-1])[:10],
-            "2021-01-01",
-        )
-
-        if self.logger:
-            self.logger.info("✅ main multi-year append Zarr test passed")
-
-    def test_main_raises_if_zarr_exists_without_overwrite(self):
-        """Test that main raises FileExistsError when output exists without overwrite."""
-
-        year = 2020
-
-        create_yearly_dummy_era5_netcdf(
-            root_dir=self.era5_root,
-            year=year,
-            variable_name=self.variable_name,
-            n_time=4,
-        )
-
-        create_yearly_dummy_cmip6_netcdf(
-            root_dir=self.cmip6_root,
-            year=year,
-            variable_name=self.variable_name,
-            n_time=4,
-            use_lat_lon=True,
-        )
-
-        os.makedirs(
-            self.output_zarr,
-            exist_ok=True,
-        )
-
-        test_args = [
-            "preprocess.py",
-            "--start_year",
-            str(year),
-            "--end_year",
-            str(year),
-            "--variable",
-            self.variable_name,
-            "--era5_root",
-            self.era5_root,
-            "--cmip6_root",
-            self.cmip6_root,
-            "--output_zarr",
-            self.output_zarr,
-            "--time_chunk",
-            "4",
-            "--lat_chunk",
-            "5",
-            "--lon_chunk",
-            "10",
-        ]
-
-        with patch.object(sys, "argv", test_args):
-            with self.assertRaises(FileExistsError):
-                main()
-
-        if self.logger:
-            self.logger.info("✅ overwrite protection test passed")
+        with patch.object(
+            sys,
+            "argv",
+            test_args,
+        ):
+            with patch(
+                "AID_BC.preprocess.process_year",
+                side_effect=[True, False],
+            ):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "latitude ordering changed",
+                ):
+                    main()
 
     # ------------------------------------------------------------------------
     # Cleanup
     # ------------------------------------------------------------------------
 
     def tearDown(self):
-        """Clean up after tests."""
+        """Remove all temporary test files."""
+        shutil.rmtree(
+            self.temp_dir,
+            ignore_errors=True,
+        )
 
-        shutil.rmtree(self.temp_dir)
-
-        if self.logger:
-            self.logger.info(f"Test teardown - removed temp directory: {self.temp_dir}")
+        self.logger.info(
+            f"Test teardown - removed temporary directory: {self.temp_dir}"
+        )
 
 
 def run_tests():
