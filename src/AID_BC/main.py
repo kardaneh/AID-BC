@@ -197,20 +197,20 @@ def parse_variable_paths(items, argument_name):
     Parameters
     ----------
     items : sequence of str or None
-        Values written as ``VARIABLE=PATH``. If None, no mapping is created.
+        Values written as VARIABLE=PATH. If None, no mapping is created.
     argument_name : str
         Name of the command-line argument, used in validation messages.
 
     Returns
     -------
     dict of str to str or None
-        Mapping from variable names to directory paths, or None when ``items``
+        Mapping from variable names to directory paths, or None when items
         is None.
 
     Raises
     ------
     ValueError
-        If an item does not use the ``VARIABLE=PATH`` format, contains an empty
+        If an item does not use the VARIABLE=PATH format, contains an empty
         variable name or path, or defines the same variable more than once.
     """
     if items is None:
@@ -342,7 +342,7 @@ def build_path(root, year):
     root : str or pathlib.Path
         Directory containing yearly NetCDF files.
     year : int
-        Year used in the ``samples_<year>.nc`` filename.
+        Year used in the samples_<year>.nc filename.
 
     Returns
     -------
@@ -362,7 +362,7 @@ def check_same_spatial_grid(reference, target):
     reference : xarray.DataArray
         Reference array defining the expected spatial grid.
     target : xarray.DataArray
-        Array whose spatial grid is compared with ``reference``.
+        Array whose spatial grid is compared with reference.
 
     Raises
     ------
@@ -402,7 +402,7 @@ def check_dataset_consistency(dataset, variable_names, label):
     dataset : xarray.Dataset
         Dataset containing the climate variables to validate.
     variable_names : sequence of str
-        Variable names expected in ``dataset``.
+        Variable names expected in dataset.
     label : str
         Readable dataset label used in error messages.
 
@@ -455,7 +455,7 @@ def select_month(data, month):
     Parameters
     ----------
     data : xarray.Dataset or xarray.DataArray
-        Input climate data with a datetime-like ``time`` coordinate.
+        Input climate data with a datetime-like time coordinate.
     month : int
         Calendar month in the inclusive range 1 to 12.
 
@@ -475,7 +475,7 @@ def resolve_precomputed_variable_root(
     """
     Resolve the precomputed ERA5 directory for one variable.
 
-    The function supports either a common directory containing ``metadata.json``
+    The function supports either a common directory containing metadata.json
     and yearly files or a parent directory containing one subdirectory per
     variable.
 
@@ -520,16 +520,16 @@ def load_precomputed_metadata(
     Returns
     -------
     metadata : dict
-        Metadata read from ``metadata.json``.
+        Metadata read from metadata.json.
     variable_root : pathlib.Path
         Directory containing the metadata and yearly variable files.
 
     Raises
     ------
     FileNotFoundError
-        If ``metadata.json`` cannot be found.
+        If metadata.json cannot be found.
     ValueError
-        If the metadata variable name conflicts with ``variable_name``.
+        If the metadata variable name conflicts with variable_name.
     """
     variable_root = resolve_precomputed_variable_root(
         era5_on_cmip6_root,
@@ -577,12 +577,12 @@ def open_dataarray(path, variable_name):
     Returns
     -------
     xarray.DataArray
-        Requested variable converted to ``float32`` and loaded into memory.
+        Requested variable converted to float32 and loaded into memory.
 
     Raises
     ------
     ValueError
-        If ``variable_name`` is not present in the file.
+        If variable_name is not present in the file.
     """
     with xr.open_dataset(path) as dataset:
         if variable_name not in dataset:
@@ -1186,20 +1186,20 @@ def flatten_dataset(
     """
     Flatten and concatenate climate variables into a feature matrix.
 
-    Variables are concatenated by blocks in the order given by ``variable_names``.
+    Variables are concatenated by blocks in the order given by variable_names.
     Each block contains all latitude-longitude grid points for one variable.
 
     Parameters
     ----------
     dataset : xarray.Dataset
-        Dataset with dimensions ``time``, ``latitude``, and ``longitude``.
+        Dataset with dimensions time, latitude, and longitude.
     variable_names : sequence of str
         Ordered variables to concatenate.
 
     Returns
     -------
     matrix : numpy.ndarray
-        Array of shape ``(time, n_variables * latitude * longitude)``.
+        Array of shape (time, n_variables * latitude * longitude).
     metadata : dict
         Variable order and original dimensions required for reconstruction.
 
@@ -1266,11 +1266,11 @@ def reconstruct_dataset(
     ----------
     corrected_2d : numpy.ndarray
         Corrected matrix with shape
-        ``(time, n_variables * latitude * longitude)``.
+        (time, n_variables * latitude * longitude).
     template_dataset : xarray.Dataset
         Dataset providing coordinates, variable attributes, and output structure.
     metadata : dict
-        Flattening metadata produced by :func:`flatten_dataset`.
+        Flattening metadata produced by flatten_dataset.
     method_name : str
         Name of the applied bias-correction method.
 
@@ -1282,7 +1282,7 @@ def reconstruct_dataset(
     Raises
     ------
     RuntimeError
-        If ``corrected_2d`` does not have the expected shape.
+        If corrected_2d does not have the expected shape.
     """
     variable_names = metadata["variable_names"]
     number_times = metadata["number_times"]
@@ -1459,7 +1459,7 @@ def fit_bias_correctors_by_month(
     method : {'qm', 'ot'}
         Bias-correction method.
     ot_kwargs : dict
-        Keyword arguments passed to :func:`create_bias_corrector`.
+        Keyword arguments passed to create_bias_corrector.
     logger : Logger
         Logger used to report monthly fitting progress.
 
@@ -1667,7 +1667,7 @@ def save_corrected_year(
     output_dirs : dict of str to str
         Output directory for each variable.
     year : int
-        Year written to the ``samples_<year>.nc`` filename.
+        Year written to the samples_<year>.nc filename.
     variable_names : sequence of str
         Variables to save.
     logger : Logger

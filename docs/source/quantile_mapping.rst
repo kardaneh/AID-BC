@@ -1,31 +1,23 @@
 Quantile Mapping
 ================
 
-Quantile Mapping is the current bias-correction method implemented in AID-BC.
+Quantile Mapping is a univariate bias-correction method used in AID-BC to reduce
+systematic distributional differences between CMIP6 climate model outputs and
+ERA5 reference data.
 
-It is used to reduce systematic distributional differences between CMIP6 climate
-model outputs and a reference dataset. In the current workflow, ERA5 is used as
-the reference dataset, and CMIP6 data are corrected so that their statistical
-distribution becomes closer to the ERA5 distribution over a chosen training
-period.
-
-The corrected CMIP6 fields can then be used as large-scale inputs for AI-based
-downscaling experiments.
+The method is fitted over a selected training period and then applied to a CMIP6
+application period. The corrected CMIP6 fields can subsequently be used as
+large-scale inputs for AI-based downscaling experiments.
 
 Purpose
 -------
 
 Climate model outputs often contain systematic biases compared with reference
-datasets or reanalysis products. These biases can affect downstream workflows,
-especially when climate variables are used as inputs to AI-based downscaling
-models.
+datasets or reanalysis products.
 
-Quantile Mapping aims to correct these biases by matching the distribution of a
-biased model variable to the distribution of a reference variable.
-
-In AID-BC, this method is used to learn a statistical relationship between
-CMIP6 and ERA5 over a training period, then apply this relationship to a target
-CMIP6 application period.
+Quantile Mapping corrects these biases by matching the distribution of a biased
+model variable to the distribution of a reference variable while preserving the
+relative rank of the model values.
 
 General principle
 -----------------
@@ -104,76 +96,64 @@ The Quantile Mapping workflow separates the data into two periods.
 ~~~~~~~~~~~~~~~~~~
 
 The training period is used to estimate the statistical relationship between
-CMIP6 and ERA5.
+ERA5 and historical CMIP6 data.
 
-During this step, AID-BC uses:
-
-- ERA5 reference data for the training period,
-- preprocessed CMIP6 data for the same training period.
-
-Both datasets must be defined on the same latitude-longitude grid. In the
-current workflow, this is achieved during preprocessing, where CMIP6 data are
-interpolated onto the ERA5 grid and stored as Zarr files.
+Both datasets must be represented on the same latitude-longitude grid. In the
+current AID-BC workflow, correction is performed on the native CMIP6 grid. ERA5
+data are therefore either prepared onto the CMIP6 grid during the workflow or
+loaded from previously prepared ERA5-on-CMIP6 files.
 
 2. Application period
 ~~~~~~~~~~~~~~~~~~~~~
 
-The application period is the period to which the learned correction is applied.
+The application period contains the CMIP6 data to be corrected using the fitted
+mapping.
 
-During this step, AID-BC uses preprocessed CMIP6 application data and applies
-the Quantile Mapping transformation learned from the training period.
-
-The application period can correspond to:
+It can correspond to:
 
 - a historical period not used during training,
 - a validation or test period,
 - a future CMIP6 simulation period.
 
-The corrected output is saved as a NetCDF file.
-
-Inputs and outputs
-------------------
-
-The Quantile Mapping step uses three main inputs:
-
-- ERA5 training data stored as NetCDF files,
-- preprocessed CMIP6 training data stored as Zarr files,
-- preprocessed CMIP6 application data stored as Zarr files.
-
-The ERA5 data provide the reference distribution. The CMIP6 training data
-provide the biased model distribution over the same period. The CMIP6
-application data are the values to be corrected.
-
-The output is a corrected CMIP6 field saved as a NetCDF file. This corrected
-field is intended to be used as input for downstream AI-based downscaling
-experiments.
+Corrected fields are reconstructed on the native CMIP6 grid and saved as yearly
+NetCDF files.
 
 Current implementation
 ----------------------
 
-The current implementation uses univariate Quantile Mapping.
+AID-BC implements Quantile Mapping as a univariate bias-correction method.
 
-This means that each variable is corrected independently. The correction is
-based on the distribution of a single variable at a time and does not explicitly
-correct dependencies between several variables.
+Exactly one climate variable is corrected during each Quantile Mapping
+experiment. The selected ERA5 and CMIP6 fields are represented on the native
+CMIP6 grid and reshaped from:
 
-For example, temperature and wind components are corrected independently when
-they are included in the workflow.
+.. code-block:: text
 
-This approach is useful for reducing marginal distributional biases, but it does
-not guarantee that physical or statistical dependencies between variables are
-fully preserved.
+   (time, latitude, longitude)
+
+to:
+
+.. code-block:: text
+
+   (time, latitude * longitude)
+
+before fitting.
+
+AID-BC can fit either:
+
+- one Quantile Mapping corrector using all training samples,
+- one independent Quantile Mapping corrector for each calendar month.
 
 Limitations
 -----------
 
-Although Quantile Mapping is widely used and effective for correcting
-distributional biases, it has some limitations.
+Quantile Mapping in AID-BC is univariate.
 
-In its current univariate form, Quantile Mapping:
+It corrects the marginal distribution of one climate variable at a time and
+does not explicitly model dependencies between several variables.
 
-- corrects each variable independently,
-- does not explicitly preserve multivariate dependencies.
+As a result, relationships between variables such as temperature and wind
+components are not jointly corrected.
 
-These limitations motivate future extensions of AID-BC toward multivariate
-bias-correction methods.
+The method also assumes that the statistical relationship estimated during the
+training period remains applicable during the application period.

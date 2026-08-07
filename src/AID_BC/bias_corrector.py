@@ -13,7 +13,7 @@ This module defines a common interface for bias-correction methods and provides
 wrappers for Quantile Mapping and entropy-regularized Optimal Transport.
 
 All correction methods operate on two-dimensional arrays with shape
-``(n_samples, n_features)``. In the climate-data workflow, samples correspond
+(n_samples, n_features). In the climate-data workflow, samples correspond
 to time steps and features correspond to flattened spatial grid points,
 possibly concatenated across several variables.
 """
@@ -32,7 +32,7 @@ class BiasCorrector(ABC):
     """
     Common interface for bias-correction methods.
 
-    All arrays follow the convention ``(n_samples, n_features)``. In the
+    All arrays follow the convention (n_samples, n_features). In the
     climate-data workflow, samples correspond to time steps and features
     correspond to flattened spatial grid points, possibly concatenated across
     several variables.
@@ -91,7 +91,7 @@ class BiasCorrector(ABC):
         Returns
         -------
         numpy.ndarray
-            Corrected data with the same shape as ``data``.
+            Corrected data with the same shape as data.
         """
 
     def fit_transform(
@@ -144,9 +144,9 @@ class BiasCorrector(ABC):
         Parameters
         ----------
         reference : numpy.ndarray
-            Reference array with shape ``(n_samples, n_features)``.
+            Reference array with shape (n_samples, n_features).
         biased : numpy.ndarray
-            Biased training array with shape ``(n_samples, n_features)``.
+            Biased training array with shape (n_samples, n_features).
 
         Raises
         ------
@@ -195,7 +195,7 @@ class BiasCorrector(ABC):
         Parameters
         ----------
         data : numpy.ndarray
-            Application array with shape ``(n_samples, n_features)``.
+            Application array with shape (n_samples, n_features).
 
         Raises
         ------
@@ -203,7 +203,7 @@ class BiasCorrector(ABC):
             If the corrector has not been fitted or its feature count is
             unavailable.
         ValueError
-            If ``data`` is not two-dimensional, has an unexpected number of
+            If data is not two-dimensional, has an unexpected number of
             features, or contains non-finite values.
         """
         if not self.is_fitted:
@@ -301,7 +301,7 @@ class QuantileMappingCorrector(BiasCorrector):
         Returns
         -------
         numpy.ndarray
-            Corrected data as ``float32``.
+            Corrected data as float32.
 
         Raises
         ------
@@ -338,7 +338,7 @@ class OptimalTransportCorrector(BiasCorrector):
         Entropic regularization strength.
     num_iterations : int, default=15000
         Maximum number of Sinkhorn iterations.
-    threshold : float, default=1e-3
+    threshold : float, default=1e-2
         Convergence threshold.
     batch_size : int, default=16
         Number of application samples transported together.
@@ -573,7 +573,7 @@ class OptimalTransportCorrector(BiasCorrector):
         biased,
     ):
         """
-        Fit the CMIP6 -> ERA5 Optimal Transport map.
+        Fit the CMIP6 to ERA5 Optimal Transport map.
 
         Parameters
         ----------
@@ -695,7 +695,7 @@ class OptimalTransportCorrector(BiasCorrector):
         Returns
         -------
         numpy.ndarray
-            Corrected data as ``float32``.
+            Corrected data as float32.
 
         Raises
         ------
@@ -813,7 +813,7 @@ def create_bias_corrector(
         Entropic regularization used by OT.
     ot_num_iterations : int, default=15000
         Maximum number of Sinkhorn iterations.
-    ot_threshold : float, default=1e-3
+    ot_threshold : float, default=1e-2
         Sinkhorn convergence threshold.
     ot_batch_size : int, default=16
         Number of application samples transported together.
@@ -830,7 +830,7 @@ def create_bias_corrector(
     Raises
     ------
     ValueError
-        If ``method`` is neither ``"qm"`` nor ``"ot"``.
+        If method is neither "qm" nor "ot".
     """
     normalized_method = method.strip().lower()
 

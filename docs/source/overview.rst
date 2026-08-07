@@ -1,21 +1,31 @@
 Overview
 ========
 
-AID-BC (AI Downscaling and Bias Correction) is a Python-based framework for
+AID-BC (AI Downscaling and Bias Correction) is a Python framework for
 preparing and bias-correcting climate data before AI-based downscaling.
 
-The package is designed to support workflows where climate model outputs must be
-made consistent with a reference dataset before being used as inputs to a
-downscaling model. In the current workflow, ERA5 is used as the reference
-dataset and CMIP6 data are bias-corrected using Quantile Mapping.
+The package is designed for workflows in which climate model outputs must be
+made more consistent with a reference dataset before being used as inputs to an
+AI downscaling model. ERA5 is used as the reference dataset, while historical
+CMIP6 data are used to fit the bias-correction model and future or independent
+CMIP6 data are used during application.
 
-The corrected CMIP6 fields can then be used as physically consistent large-scale
-inputs for downstream AI downscaling experiments.
+Bias correction is performed on the native CMIP6 latitude-longitude grid. ERA5
+fields are either processed directly onto the CMIP6 grid during the workflow or
+loaded from previously prepared ERA5-on-CMIP6 files.
 
-The current implementation focuses on univariate bias correction. Future
-developments aim to extend the framework toward multivariate bias correction,
-including methods based on Optimal Transport, in order to better preserve
-dependencies between variables and spatial structures.
+AID-BC currently supports two bias-correction approaches:
+
+- univariate Quantile Mapping,
+- multivariate entropy-regularized Optimal Transport.
+
+Quantile Mapping corrects one climate variable independently. Optimal Transport
+can correct one or several variables jointly by representing all selected
+variables and spatial grid points in a common multivariate feature space.
+
+The corrected CMIP6 fields are saved as yearly NetCDF files and can then be used
+as physically more consistent large-scale inputs for downstream AI downscaling
+experiments.
 
 Main objectives
 ---------------
@@ -23,102 +33,202 @@ Main objectives
 AID-BC provides tools to:
 
 - load ERA5 and CMIP6 climate datasets,
-- preprocess CMIP6 data onto the ERA5 latitude-longitude grid,
-- store preprocessed CMIP6 data as Zarr files,
-- apply Quantile Mapping by spatial chunks,
-- reduce memory usage during large-scale bias correction,
-- save corrected climate fields as NetCDF files,
-- prepare corrected CMIP6 inputs for AI-based downscaling workflows,
-- provide a foundation for future multivariate bias-correction methods,
-- support future Optimal Transport-based bias-correction experiments.
+- process ERA5 data onto the native CMIP6 grid,
+- load previously prepared ERA5-on-CMIP6 data,
+- validate spatial grids, temporal coordinates, and variable consistency,
+- apply univariate Quantile Mapping,
+- apply multivariate entropy-regularized Optimal Transport,
+- jointly correct several climate variables with Optimal Transport,
+- fit one global corrector or one corrector per month,
+- process application data one year at a time,
+- save each corrected variable as a compressed yearly NetCDF file,
+- prepare corrected CMIP6 inputs for AI-based downscaling workflows.
+
+Supported methods
+-----------------
+
+1. Quantile Mapping
+~~~~~~~~~~~~~~~~~~~
+
+Quantile Mapping is implemented as a univariate correction method. It requires
+exactly one climate variable for each execution.
+
+The method learns the statistical relationship between historical CMIP6 data
+and ERA5 reference data over the selected training period. The fitted mapping
+is then applied to CMIP6 data from the requested application period.
+
+Quantile Mapping corrects the marginal distribution of the selected variable
+but does not explicitly model dependencies between several variables.
+
+2. Optimal Transport
+~~~~~~~~~~~~~~~~~~~~
+
+Optimal Transport is implemented as a multivariate bias-correction method. It
+can be applied to one variable or to several variables jointly.
+
+The selected variables are flattened over the spatial grid and concatenated
+into a common feature matrix. Each time step therefore becomes one
+multidimensional sample containing all selected variables and all native CMIP6
+grid points.
+
+An entropy-regularized Sinkhorn solver is fitted between:
+
+- historical CMIP6 samples as the source distribution,
+- ERA5 samples on the CMIP6 grid as the target distribution.
+
+The fitted transport map is then applied to the CMIP6 application period.
+
+This formulation allows the correction to account for dependencies between
+variables and spatial grid points within the multivariate feature space.
+
+Native CMIP6 grid
+-----------------
+
+AID-BC performs bias correction on the native CMIP6 grid.
+
+When raw ERA5 files are used, ERA5 data are prepared and aligned with the CMIP6
+grid before fitting. When ERA5-on-CMIP6 files have already been generated, the
+workflow loads these precomputed fields directly.
+
+All selected variables must share compatible:
+
+- time coordinates,
+- latitude coordinates,
+- longitude coordinates,
+- spatial dimensions.
+
+The same variable ordering is preserved during training, application,
+flattening, transport, reconstruction, and output.
 
 Workflow summary
 ----------------
 
-The workflow is split into two main steps.
+The workflow is divided into four main stages.
 
-1. Preprocessing
-~~~~~~~~~~~~~~~~
+1. Argument and path validation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-CMIP6 data are first interpolated onto the ERA5 grid and saved as Zarr files.
-This step is performed once and avoids repeating the interpolation during the
-bias-correction step.
+The command-line configuration defines:
 
-The preprocessing step includes:
+- the bias-correction method,
+- the temporal split mode,
+- the training period,
+- the application period,
+- the selected climate variables,
+- the ERA5 input directories,
+- the historical CMIP6 directories,
+- the CMIP6 application directories,
+- the output directories,
+- the Optimal Transport parameters when applicable.
 
-- loading ERA5 and CMIP6 NetCDF files,
-- renaming CMIP6 coordinates when needed,
-- adding a cyclic longitude point,
-- interpolating CMIP6 data onto the ERA5 grid,
-- writing the interpolated CMIP6 data to Zarr.
+Variable-specific paths are provided using the following format:
 
-2. Bias correction
+.. code-block:: text
+
+   VARIABLE=PATH
+
+For example:
+
+.. code-block:: text
+
+   VAR_2T=/data/kkingston/data/CMIP6/CMIP6_historical/data_6hourly_tas
+   VAR_10U=/data/kkingston/data/CMIP6/CMIP6_historical/data_6hourly_uas
+   VAR_10V=/data/kkingston/data/CMIP6/CMIP6_historical/data_6hourly_vas
+
+The workflow verifies that paths are provided for exactly the requested
+variables.
+
+2. Training-data preparation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For each selected variable, AID-BC loads:
+
+- ERA5 reference data,
+- historical CMIP6 training data.
+
+ERA5 can be provided either as:
+
+- raw ERA5 data that must be prepared on the CMIP6 grid,
+- precomputed ERA5-on-CMIP6 yearly files.
+
+The yearly fields are loaded, checked, and concatenated across the complete
+training period.
+
+When several variables are requested, they are aligned exactly in time,
+latitude, and longitude before being assembled into common xarray datasets.
+
+3. Bias-corrector fitting
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The training datasets are flattened into matrices with shape:
+
+.. code-block:: text
+
+   (number_of_time_steps, number_of_features)
+
+For one variable, the features correspond to all latitude-longitude grid
+points.
+
+For multivariate Optimal Transport, the feature blocks of all requested
+variables are concatenated in the order specified on the command line.
+
+The workflow can fit:
+
+- one global corrector using all training samples,
+- one separate corrector for each month.
+
+Monthly splitting reduces the number of samples included in each fit and can
+substantially reduce the computational cost of Optimal Transport.
+
+4. Application and output
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+CMIP6 application data are loaded one year at a time.
+
+The fitted global or monthly corrector is applied to the corresponding
+application samples. The corrected feature matrix is then reconstructed into
+the original time, latitude, and longitude dimensions.
+
+Each corrected variable is written separately as:
+
+.. code-block:: text
+
+   samples_<year>.nc
+
+The output files use NetCDF compression and preserve the variable coordinates
+and relevant metadata from the CMIP6 application data.
+
+Temporal splitting
+------------------
+
+AID-BC supports two temporal fitting modes.
+
+Global correction
+~~~~~~~~~~~~~~~~~
+
+With:
+
+.. code-block:: text
+
+   --split none
+
+one corrector is fitted using all training samples across all months.
+
+Monthly correction
 ~~~~~~~~~~~~~~~~~~
 
-The bias-correction step reads:
+With:
 
-- ERA5 training data from NetCDF files,
-- preprocessed CMIP6 training data from Zarr,
-- preprocessed CMIP6 application data from Zarr.
+.. code-block:: text
 
-Quantile Mapping is then fitted on the training period and applied to the target
-application period. The correction is performed by spatial chunks over latitude
-and longitude to limit memory usage.
+   --split month
 
-The resulting corrected CMIP6 data are saved as NetCDF files and can be used as
-inputs for later downscaling experiments.
+one independent corrector is fitted for each month.
 
-Chunked processing
-------------------
+During application, January data are corrected with the January corrector,
+February data with the February corrector, and so on. The corrected monthly
+datasets are then concatenated and restored to chronological order.
 
-AID-BC uses chunking for two different purposes.
-
-During preprocessing, chunking controls how the interpolated CMIP6 data are
-stored on disk in Zarr format. This does not change the data values.
-
-During bias correction, chunking controls the spatial blocks processed by
-Quantile Mapping. For each spatial block, all available time steps are used.
-
-This design allows the package to process large global datasets without loading
-the full spatial domain into memory at once.
-
-Current method
---------------
-
-The current bias-correction method is univariate Quantile Mapping. For each
-spatial chunk, the method learns the statistical relationship between CMIP6 and
-ERA5 over a training period, then applies the correction to a target CMIP6
-application period.
-
-This correction step is intended to reduce systematic distributional biases in
-CMIP6 before the data are used by AI downscaling models.
-
-Planned extensions
-------------------
-
-Future developments will focus on multivariate bias correction. Unlike
-univariate methods, multivariate approaches aim to correct several variables
-jointly and to better preserve dependencies between variables, temporal
-structures, and spatial patterns.
-
-Optimal Transport-based methods are planned as a major direction for these
-extensions. They are expected to provide a framework for mapping distributions
-between biased model outputs and reference data while accounting for
-multidimensional dependencies.
-
-These developments are intended to make AID-BC suitable for preparing more
-physically consistent inputs for AI-based downscaling models.
-
-Typical use case
-----------------
-
-A typical use case is:
-
-- train Quantile Mapping using historical CMIP6 and ERA5 data,
-- apply the trained correction to a future CMIP6 year,
-- save the corrected field as a NetCDF file,
-- use the corrected CMIP6 field as input to an AI downscaling pipeline.
-
-For example, the workflow can be used to train on CMIP6 historical data from
-2000 to 2014, apply the correction to a future CMIP6 simulation for 2021, and
-then use the corrected 2021 field for downstream downscaling experiments.
+Monthly splitting is particularly useful for climate variables with strong
+seasonal distributions. It also reduces the number of samples involved in each
+Optimal Transport problem.
