@@ -661,8 +661,14 @@ class OptimalTransportCorrector(BiasCorrector):
 
         # For CMIP6 -> ERA5, use the target potential gv and
         # the target points ERA5.
-        self.target_potential = output.gv
-        self.target_points = target_points
+        # self.target_potential = output.gv
+        # self.target_points = target_points
+
+        # Store persistent OT data on CPU instead of keeping JAX arrays
+        # on the GPU. This avoids GPU-memory accumulation when
+        # several correctors (12 month correctors) are kept alive at the same time.
+        self.target_potential = np.asarray(output.gv)
+        self.target_points = np.asarray(target_points)
 
         self.transport_function = self.solver.transport_fn(
             potential=self.target_potential,
@@ -670,9 +676,10 @@ class OptimalTransportCorrector(BiasCorrector):
         )
 
         # SinkhornOutput contains the full cost matrix.
-        # Do not preserve it after extracting the required values.
+        # Release GPU-side temporary arrays after fitting.
         del output
         del source_points
+        del target_points
         del biased_normalized
         del reference_normalized
 

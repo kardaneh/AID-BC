@@ -6,13 +6,13 @@ bias correction of climate-model data on the native CMIP6 grid.
 
 The package provides:
 
-- loading and standardization of yearly ERA5 and CMIP6 NetCDF files;
-- resizing ERA5 fields onto the native CMIP6 grid;
-- optional precomputation of ERA5-on-CMIP6 yearly files;
-- univariate Quantile Mapping (QM);
-- univariate or multivariate Optimal Transport (OT);
-- global or calendar-month bias-correction fitting;
-- yearly compressed NetCDF outputs;
+- loading and standardization of yearly ERA5 and CMIP6 NetCDF files,
+- resizing ERA5 fields onto the native CMIP6 grid,
+- optional precomputation of ERA5-on-CMIP6 yearly files,
+- univariate Quantile Mapping (QM),
+- univariate or multivariate Optimal Transport (OT),
+- global or calendar-month bias-correction fitting,
+- yearly compressed NetCDF outputs,
 - logging and diagnostic utilities.
 
 
@@ -132,8 +132,8 @@ a CMIP6 dataset and writes one compressed NetCDF file per year.
 
 Run this step once for each combination of:
 
-- ERA5 source directory;
-- CMIP6 grid;
+- ERA5 source directory,
+- CMIP6 grid,
 - climate variable.
 
 Example for 2 m air temperature:
@@ -161,9 +161,9 @@ The output directory contains:
 
 The metadata file records:
 
-- the variable name;
-- the original ERA5 latitude orientation;
-- the ERA5 and CMIP6 source directories;
+- the variable name,
+- the original ERA5 latitude orientation,
+- the ERA5 and CMIP6 source directories,
 - the processed year range.
 
 For an OT experiment using several variables, run the preprocessing command
@@ -224,7 +224,7 @@ Example for 2 m temperature and the two 10 m wind components:
    python -m AID_BC.main \
      --method ot \
      --split month \
-     --train_start 1980 \
+     --train_start 2000 \
      --train_end 2014 \
      --apply_start 2021 \
      --apply_end 2021 \
@@ -245,9 +245,9 @@ Example for 2 m temperature and the two 10 m wind components:
        VAR_2T=/net/nfs/ssd1/kkingston/AID-BC/data/CMIP6_OT/data_6hourly_tas_corrected \
        VAR_10U=/net/nfs/ssd1/kkingston/AID-BC/data/CMIP6_OT/data_6hourly_uas_corrected \
        VAR_10V=/net/nfs/ssd1/kkingston/AID-BC/data/CMIP6_OT/data_6hourly_vas_corrected \
-     --ot_epsilon 1000 \
-     --ot_num_iterations 15000 \
-     --ot_threshold 0.01 \
+     --ot_epsilon 100 \
+     --ot_num_iterations 100000 \
+     --ot_threshold 0.1 \
      --ot_batch_size 16 \
      --ot_dtype float64
 
@@ -296,9 +296,9 @@ For every training year, AID-BC loads:
 
 The package verifies that requested variables share:
 
-- the same spatial grid;
-- the same time coordinates within each dataset;
-- finite values;
+- the same spatial grid,
+- the same time coordinates within each dataset,
+- finite values,
 - the required dimensions.
 
 The yearly datasets are concatenated along the time dimension before fitting.
@@ -309,10 +309,10 @@ Application
 
 For every application year, AID-BC:
 
-1. loads CMIP6 data on the native grid;
-2. applies the fitted global or monthly corrector;
+1. loads CMIP6 data on the native grid,
+2. applies the fitted global or monthly corrector,
 3. reconstructs each corrected variable on the original
-   ``time × latitude × longitude`` layout;
+   ``time × latitude × longitude`` layout,
 4. writes one NetCDF file per corrected variable and year.
 
 
