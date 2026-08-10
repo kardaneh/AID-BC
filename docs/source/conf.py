@@ -43,6 +43,7 @@ autodoc_mock_imports = [
     "tqdm",
     "cycler",
     "seaborn",
+    "jax",
 ]
 
 autodoc_default_options = {

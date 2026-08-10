@@ -18,6 +18,7 @@ sys.path.insert(
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")),
 )
 
+from AID_BC.logger import Logger
 from AID_BC.quantile_mapping import MonotoneInverse, QM, rv_histogram
 
 # python -m unittest tests.test_quantile_mapping
@@ -31,6 +32,15 @@ from AID_BC.quantile_mapping import MonotoneInverse, QM, rv_histogram
 class TestMonotoneInverse(unittest.TestCase):
     """Unit tests for MonotoneInverse."""
 
+    def setUp(self):
+        """Create a test logger."""
+        self.logger = Logger(
+            console_output=True,
+            file_output=False,
+            pretty_print=True,
+            record=False,
+        )
+
     def test_linear_inverse(self):
         """
         Test a monotone inverse using a linear function with a known inverse.
@@ -43,6 +53,7 @@ class TestMonotoneInverse(unittest.TestCase):
 
         x = (y - 3) / 2.
         """
+        self.logger.info("Testing MonotoneInverse with a linear function")
 
         def transform(x):
             return 2.0 * x + 3.0
@@ -71,6 +82,8 @@ class TestMonotoneInverse(unittest.TestCase):
             atol=1e-10,
         )
 
+        self.logger.info("✅ MonotoneInverse linear-function test passed")
+
 
 # ============================================================================
 # Unit Tests for rv_histogram
@@ -93,6 +106,13 @@ class TestRvHistogram(unittest.TestCase):
 
         The first probability is replaced by zero by rv_histogram.
         """
+        self.logger = Logger(
+            console_output=True,
+            file_output=False,
+            pretty_print=True,
+            record=False,
+        )
+
         self.samples = np.arange(
             0.0,
             100.0,
@@ -103,6 +123,8 @@ class TestRvHistogram(unittest.TestCase):
 
     def test_cdf_quantiles(self):
         """Test empirical CDF values obtained from the sample ranks."""
+        self.logger.info("Testing empirical CDF quantiles")
+
         values = np.array([0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 90.0])
 
         # Interpolation points begin with:
@@ -116,8 +138,12 @@ class TestRvHistogram(unittest.TestCase):
             atol=1e-12,
         )
 
+        self.logger.info("✅ Empirical CDF quantiles test passed")
+
     def test_inverse_quantiles(self):
         """Test empirical inverse CDF values obtained by interpolation."""
+        self.logger.info("Testing empirical inverse CDF quantiles")
+
         probabilities = np.array([0.0, 0.1, 0.2, 0.25, 0.3, 0.35, 1.0])
 
         expected_quantiles = np.array([0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 90.0])
@@ -129,6 +155,8 @@ class TestRvHistogram(unittest.TestCase):
             atol=1e-12,
         )
 
+        self.logger.info("✅ Empirical inverse CDF quantiles test passed")
+
 
 # ============================================================================
 # Unit Tests for QM
@@ -137,6 +165,15 @@ class TestRvHistogram(unittest.TestCase):
 
 class TestQuantileMapping(unittest.TestCase):
     """Unit tests for empirical and parametric quantile mapping."""
+
+    def setUp(self):
+        """Create a test logger."""
+        self.logger = Logger(
+            console_output=True,
+            file_output=False,
+            pretty_print=True,
+            record=False,
+        )
 
     def test_empirical_mapping(self):
         """
@@ -156,6 +193,8 @@ class TestQuantileMapping(unittest.TestCase):
         - The reference quantile at probability 0.1 is 150.
         - Therefore QM(5) = 150.
         """
+        self.logger.info("Testing empirical Quantile Mapping")
+
         biased = np.arange(
             0.0,
             100.0,
@@ -192,6 +231,8 @@ class TestQuantileMapping(unittest.TestCase):
             atol=1e-12,
         )
 
+        self.logger.info("✅ Empirical Quantile Mapping test passed")
+
     def test_normal_mapping(self):
         """
         Test normal quantile mapping with frozen distributions.
@@ -202,6 +243,8 @@ class TestQuantileMapping(unittest.TestCase):
 
         y = 10 + 2x.
         """
+        self.logger.info("Testing normal-distribution Quantile Mapping")
+
         model = QM(
             n_features=1,
             distX0=sc.norm(
@@ -231,6 +274,8 @@ class TestQuantileMapping(unittest.TestCase):
             atol=1e-12,
         )
 
+        self.logger.info("✅ Normal-distribution Quantile Mapping test passed")
+
     def test_two_features(self):
         """
         Test independent correction of two features.
@@ -243,6 +288,8 @@ class TestQuantileMapping(unittest.TestCase):
 
         y2 = -5 + 0.5 * (x2 - 100).
         """
+        self.logger.info("Testing two-feature Quantile Mapping")
+
         model = QM(
             n_features=2,
             distX0=[
@@ -296,6 +343,8 @@ class TestQuantileMapping(unittest.TestCase):
             rtol=1e-12,
             atol=1e-12,
         )
+
+        self.logger.info("✅ Two-feature Quantile Mapping test passed")
 
 
 def run_tests():

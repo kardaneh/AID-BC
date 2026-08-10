@@ -239,6 +239,8 @@ class TestPreprocess(unittest.TestCase):
 
     def test_build_path(self):
         """Test yearly NetCDF path construction."""
+        self.logger.info("Testing yearly NetCDF path construction")
+
         path = build_path(
             self.era5_root,
             2020,
@@ -252,6 +254,8 @@ class TestPreprocess(unittest.TestCase):
             ),
         )
 
+        self.logger.info("✅ Yearly NetCDF path construction test passed")
+
     # ------------------------------------------------------------------------
     # process_year tests
     # ------------------------------------------------------------------------
@@ -260,6 +264,10 @@ class TestPreprocess(unittest.TestCase):
         """
         Test preprocessing and writing one ERA5-on-CMIP6 yearly file.
         """
+        self.logger.info(
+            "Testing preprocessing and writing of one ERA5-on-CMIP6 yearly file"
+        )
+
         year = 2020
 
         _, era5_dataset = create_yearly_dummy_era5_netcdf(
@@ -350,8 +358,12 @@ class TestPreprocess(unittest.TestCase):
                 era5_dataset["time"].values,
             )
 
+        self.logger.info("✅ ERA5-on-CMIP6 yearly preprocessing test passed")
+
     def test_process_year_returns_false_for_ascending_era5_latitude(self):
         """Test detection of ascending ERA5 latitude coordinates."""
+        self.logger.info("Testing detection of ascending ERA5 latitude coordinates")
+
         year = 2020
 
         create_yearly_dummy_era5_netcdf(
@@ -378,12 +390,16 @@ class TestPreprocess(unittest.TestCase):
 
         self.assertFalse(latitude_descending)
 
+        self.logger.info("✅ Ascending ERA5 latitude detection test passed")
+
     # ------------------------------------------------------------------------
     # main tests
     # ------------------------------------------------------------------------
 
     def test_main_writes_single_year_netcdf_and_metadata(self):
         """Test one-year preprocessing through the command-line entry point."""
+        self.logger.info("Testing single-year preprocessing and metadata writing")
+
         year = 2020
 
         create_yearly_dummy_era5_netcdf(
@@ -462,8 +478,14 @@ class TestPreprocess(unittest.TestCase):
             year,
         )
 
+        self.logger.info(
+            "✅ Single-year preprocessing and metadata writing test passed"
+        )
+
     def test_main_writes_one_netcdf_file_per_year(self):
         """Test that multiple years are written as separate NetCDF files."""
+        self.logger.info("Testing one NetCDF output file per preprocessing year")
+
         years = [2020, 2021]
 
         for year in years:
@@ -540,10 +562,16 @@ class TestPreprocess(unittest.TestCase):
             years[-1],
         )
 
+        self.logger.info("✅ Multi-year preprocessing output test passed")
+
     def test_main_raises_if_latitude_orientation_changes(self):
         """
         Test rejection of inconsistent ERA5 latitude ordering across years.
         """
+        self.logger.info(
+            "Testing rejection of inconsistent ERA5 latitude ordering across years"
+        )
+
         test_args = [
             "preprocess.py",
             "--era5_root",
@@ -574,6 +602,8 @@ class TestPreprocess(unittest.TestCase):
                     "latitude ordering changed",
                 ):
                     main()
+
+        self.logger.info("✅ Inconsistent ERA5 latitude-order rejection test passed")
 
     # ------------------------------------------------------------------------
     # Cleanup

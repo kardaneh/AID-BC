@@ -25,6 +25,7 @@ GitHub repository: https://github.com/kardaneh/AID-BC
    :caption: Core Concepts
 
    quantile_mapping
+   optimal_transport
 
 .. toctree::
    :maxdepth: 2
