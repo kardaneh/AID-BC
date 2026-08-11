@@ -184,7 +184,7 @@ slurm/*
 slurm_io/*
 !slurm_io/.gitkeep
 
-tests_plots/
+test_plots/
 # Ignore all __pycache__ folders recursively
 __pycache__/
 .virtual_documents/

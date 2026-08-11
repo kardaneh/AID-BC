@@ -182,7 +182,7 @@ cat >> "$sbatch_script" <<EOF
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:$current_gpus
 #SBATCH --mem=0 #55G, 110G
-#SBATCH --time=1-00:00:00
+#SBATCH --time=05:00:00 #1-00:00:00
 #SBATCH --nodelist=hal5
 #SBATCH --mail-user=kkingston@ipsl.fr
 #SBATCH --mail-type=END,FAIL
@@ -206,7 +206,7 @@ cat >> "$sbatch_script" <<EOF
 #SBATCH --time=1-00:00:00
 #SBATCH -N 1
 #SBATCH --gpus-per-node=$current_gpus
-#SBATCH --mem-per-gpu=110G
+#SBATCH --mem-per-gpu=64G
 #SBATCH --mail-user=kkingston@ipsl.fr
 #SBATCH --mail-type=END,FAIL
 EOF
@@ -259,6 +259,14 @@ source "$PROJECT_ROOT/.venv/bin/activate"
 EOF
 
 elif [ "$Machine" = "HAL" ]; then
+
+    cat >> "$sbatch_script" <<EOF
+
+module purge
+source "$PROJECT_ROOT/.venv/bin/activate"
+EOF
+
+elif [ "$Machine" = "AUSTRAL" ]; then
 
     cat >> "$sbatch_script" <<EOF
 

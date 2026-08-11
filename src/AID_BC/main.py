@@ -18,8 +18,10 @@ from AID_BC.bias_corrector import (
     BiasCorrector,
     create_bias_corrector,
 )
-from AID_BC.dataset import ClimateDataset
+
 from AID_BC.logger import Logger
+from AID_BC.evaluater import evaluate
+from AID_BC.dataset import ClimateDataset
 
 
 def parse_args():
@@ -1116,18 +1118,24 @@ def load_training_data(
 
 def load_application_data(
     year,
+    era5_roots,
+    era5_on_cmip6_roots,
     cmip6_apply_roots,
     variable_names,
     latitude_descending,
     logger,
 ):
     """
-    Load and assemble CMIP6 variables for one application year.
+    Load and assemble ERA5 reference and CMIP6 data for one application year.
 
     Parameters
     ----------
     year : int
         Application year to load.
+    era5_roots : dict of str to str or None
+        Raw ERA5 directory for each variable.
+    era5_on_cmip6_roots : dict of str to str or None
+        Precomputed ERA5-on-CMIP6 directory for each variable.
     cmip6_apply_roots : dict of str to str
         CMIP6 application directory for each variable.
     variable_names : sequence of str
@@ -1139,10 +1147,13 @@ def load_application_data(
 
     Returns
     -------
-    xarray.Dataset
-        Aligned CMIP6 variables for the requested year.
+    reference_apply : xarray.Dataset
+        ERA5 reference data on the CMIP6 grid.
+    biased_apply : xarray.Dataset
+        Raw CMIP6 application data.
     """
-    application_variables = {}
+    reference_variables = {}
+    biased_variables = {}
 
     for variable_name in variable_names:
         cmip6_path = build_path(
@@ -1150,33 +1161,127 @@ def load_application_data(
             year,
         )
 
-        climate_dataset = ClimateDataset(
-            cmip6_path=cmip6_path,
-            variable_name=variable_name,
-            logger=logger,
-        )
-
-        variable_data = (
-            climate_dataset.prepare_dataset(
-                latitude_descending=latitude_descending,
+        if era5_on_cmip6_roots is not None:
+            variable_root = resolve_precomputed_variable_root(
+                era5_on_cmip6_roots[variable_name],
+                variable_name,
             )
-            .astype(np.float32)
-            .load()
-            .transpose(
+
+            era5_path = build_path(
+                variable_root,
+                year,
+            )
+
+            reference_variable = open_dataarray(
+                era5_path,
+                variable_name,
+            ).transpose(
                 "time",
                 "latitude",
                 "longitude",
             )
-        )
+
+            climate_dataset = ClimateDataset(
+                cmip6_path=cmip6_path,
+                variable_name=variable_name,
+                logger=logger,
+            )
+
+            biased_variable = (
+                climate_dataset.prepare_dataset(
+                    latitude_descending=latitude_descending,
+                )
+                .astype(np.float32)
+                .load()
+                .transpose(
+                    "time",
+                    "latitude",
+                    "longitude",
+                )
+            )
+
+        else:
+            if era5_roots is None:
+                raise RuntimeError("Internal error: ERA5 roots are unavailable.")
+
+            era5_path = build_path(
+                era5_roots[variable_name],
+                year,
+            )
+
+            climate_dataset = ClimateDataset(
+                era5_path=era5_path,
+                cmip6_path=cmip6_path,
+                variable_name=variable_name,
+                logger=logger,
+            )
+
+            (
+                reference_variable,
+                biased_variable,
+                current_latitude_descending,
+            ) = climate_dataset.prepare_dataset()
+
+            if current_latitude_descending != latitude_descending:
+                raise ValueError(
+                    f"Latitude orientation differs for "
+                    f"{variable_name} in year {year}."
+                )
+
+            reference_variable = (
+                reference_variable.astype(np.float32)
+                .load()
+                .transpose(
+                    "time",
+                    "latitude",
+                    "longitude",
+                )
+            )
+
+            biased_variable = (
+                biased_variable.astype(np.float32)
+                .load()
+                .transpose(
+                    "time",
+                    "latitude",
+                    "longitude",
+                )
+            )
 
         climate_dataset.close()
-        application_variables[variable_name] = variable_data
 
-    return assemble_variable_dataset(
-        application_variables,
+        check_same_spatial_grid(
+            reference_variable,
+            biased_variable,
+        )
+
+        reference_variables[variable_name] = reference_variable
+        biased_variables[variable_name] = biased_variable
+
+    reference_apply = assemble_variable_dataset(
+        reference_variables,
+        variable_names,
+        label=f"ERA5 evaluation year {year}",
+    )
+
+    biased_apply = assemble_variable_dataset(
+        biased_variables,
         variable_names,
         label=f"CMIP6 application year {year}",
     )
+
+    check_same_spatial_grid(
+        reference_apply[variable_names[0]],
+        biased_apply[variable_names[0]],
+    )
+
+    if not np.array_equal(
+        reference_apply["time"].values,
+        biased_apply["time"].values,
+    ):
+        raise ValueError(f"ERA5 and CMIP6 time coordinates differ for year {year}.")
+
+    return reference_apply, biased_apply
 
 
 def flatten_dataset(
@@ -1778,6 +1883,8 @@ def main():
         "--output_dir",
     )
 
+    run_name = Path(output_dirs[variable_names[0]]).parent.name
+
     logger.info(f"Selected bias-correction method: {args.method.upper()}")
 
     logger.info(f"Selected variables: {variable_names}")
@@ -1848,8 +1955,10 @@ def main():
     ):
         logger.info(f"Correcting CMIP6 year {year}")
 
-        biased_apply = load_application_data(
+        reference_apply, biased_apply = load_application_data(
             year=year,
+            era5_roots=era5_roots,
+            era5_on_cmip6_roots=era5_on_cmip6_roots,
             cmip6_apply_roots=cmip6_apply_roots,
             variable_names=variable_names,
             latitude_descending=latitude_descending,
@@ -1871,6 +1980,17 @@ def main():
                 logger=logger,
             )
 
+        evaluate(
+            reference=reference_apply,
+            raw=biased_apply,
+            corrected=corrected,
+            variable_names=variable_names,
+            method=args.method,
+            year=year,
+            logger=logger,
+            run_name=run_name,
+        )
+
         save_corrected_year(
             corrected=corrected,
             output_dirs=output_dirs,
@@ -1879,6 +1999,7 @@ def main():
             logger=logger,
         )
 
+        del reference_apply
         del biased_apply
         del corrected
         gc.collect()

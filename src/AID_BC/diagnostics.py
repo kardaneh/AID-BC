@@ -6,14 +6,14 @@
 # To view a copy of this license, visit
 # http://creativecommons.org/licenses/by-nc-sa/4.0/
 
+import os
+import mpltex
 import numpy as np
+import seaborn as sns
+from scipy import stats
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
-import os
-import mpltex
-from sklearn.metrics import r2_score
-from scipy import stats
 
 
 # ---------------------------------------------
@@ -213,154 +213,6 @@ def to_numpy_4d(data):
         )
 
     return data
-
-
-def plot_validation_hexbin(
-    predictions,  # Model predictions (fine predicted)
-    targets,  # Ground truth (fine true)
-    coarse_inputs=None,  # Coarse inputs for comparison (optional)
-    variable_names=None,  # List of variable names
-    filename="validation_hexbin.png",
-    save_dir="./results",
-    figsize_multiplier=4,  # Base size per subplot
-):
-    """
-    Create hexbin plots comparing model predictions vs ground truth for all variables.
-
-    Parameters
-    ----------
-    predictions : torch.Tensor, numpy.ndarray, xarray.DataArray, or list of xarray.DataArray
-        Model predictions of shape [batch_size, num_variables, h, w]
-    targets : torch.Tensor, numpy.ndarray, xarray.DataArray, or list of xarray.DataArray
-        Ground truth of shape [batch_size, num_variables, h, w]
-    coarse_inputs : torch.Tensor, numpy.ndarray, xarray.DataArray, or list of xarray.DataArray, optional
-        Coarse inputs of shape [batch_size, num_variables, h, w]
-    variable_names : list of str, optional
-        Names of the variables for subplot titles
-    filename : str, optional
-        Output filename
-    save_dir : str, optional
-        Directory to save the plot
-    figsize_multiplier : int, optional
-        Base size multiplier for subplots
-    """
-
-    # Convert tensors, NumPy arrays, or xarray objects to NumPy 4D arrays
-    predictions = to_numpy_4d(predictions)
-    targets = to_numpy_4d(targets)
-
-    if coarse_inputs is not None:
-        coarse_inputs = to_numpy_4d(coarse_inputs)
-
-    batch_size, num_vars, h, w = predictions.shape
-
-    # Default variable names if not provided
-    if variable_names is None:
-        variable_names = [f"VAR_{i}" for i in range(num_vars)]
-
-    # Calculate grid dimensions
-    ncols = num_vars
-    nrows = (num_vars + ncols - 1) // ncols  # Ceiling division
-
-    # Create figure
-    fig, axes = plt.subplots(
-        nrows, ncols, figsize=(ncols * figsize_multiplier, figsize_multiplier)
-    )  #
-
-    axes = np.atleast_1d(axes).ravel()
-
-    for ax in axes:
-        ax.set_box_aspect(1)
-
-    # Handle single subplot case
-    if num_vars == 1:
-        axes = np.array([axes])
-    if axes.ndim == 1:
-        axes = axes.reshape(1, -1)
-
-    # Flatten axes for easy iteration
-    axes_flat = axes.flatten()
-
-    # Plot each variable
-    max_count = 0
-    for i, (var_name, ax) in enumerate(zip(variable_names, axes_flat)):
-        if i >= num_vars:
-            ax.set_visible(False)
-            continue
-
-        pred_i = PlotConfig.convert_units(var_name, predictions[:, i])
-        tgt_i = PlotConfig.convert_units(var_name, targets[:, i])
-
-        pred_flat = pred_i.reshape(-1)
-        target_flat = tgt_i.reshape(-1)
-
-        # Create hexbin plot
-        hb = ax.hexbin(
-            target_flat, pred_flat, gridsize=100, cmap="jet", bins="log", mincnt=1
-        )
-
-        # Get counts for colorbar scaling
-        counts = hb.get_array()
-        if counts is not None:
-            max_count = max(max_count, np.max(counts))
-
-        # Add identity line
-        min_val = min(target_flat.min(), pred_flat.min())
-        max_val = max(target_flat.max(), pred_flat.max())
-        ax.plot([min_val, max_val], [min_val, max_val], "r--", alpha=0.7)
-
-        # Calculate metrics
-        r2 = r2_score(target_flat, pred_flat)
-        mae = np.mean(np.abs(pred_flat - target_flat))
-        rmse = np.sqrt(np.mean((pred_flat - target_flat) ** 2))
-
-        # Add metrics to plot
-        textstr = f"$R^2$: {r2:.3f}\nMAE: {mae:.3f}\nRMSE: {rmse:.3f}"
-        ax.text(
-            0.05,
-            0.95,
-            textstr,
-            transform=ax.transAxes,
-            fontsize=10,
-            verticalalignment="top",
-        )
-
-        # Set title
-        plot_name = PlotConfig.get_plot_name(var_name)
-        ax.set_title(plot_name)
-
-        # Format ticks
-        ax.xaxis.set_major_locator(ticker.MaxNLocator(5))
-        ax.yaxis.set_major_locator(ticker.MaxNLocator(5))
-
-        # Only show y-label for leftmost subplots
-        if i % ncols == 0:  # First column
-            ax.set_ylabel("Predicted Values")
-        else:
-            ax.set_ylabel("")  # Remove y-label for non-leftmost plots
-
-        # Only show x-label for bottom row subplots
-        if i >= (nrows - 1) * ncols:  # Last row
-            ax.set_xlabel("True Values")
-        else:
-            ax.set_xlabel("")  # Remove x-label for non-bottom plots
-
-    ax_last = axes_flat[min(num_vars - 1, len(axes_flat) - 1)]
-
-    cax = ax_last.inset_axes([1.05, 0.0, 0.04, 1.0])  # [x, y, width, height]
-    cbar = fig.colorbar(hb, cax=cax)
-    cbar.set_label(r"$\log_{10}[\mathrm{Count}]$")
-
-    plt.subplots_adjust(
-        hspace=0.1, wspace=0.3, left=0.1, right=0.9, top=0.9, bottom=0.1
-    )
-
-    # Ensure save directory exists
-    os.makedirs(save_dir, exist_ok=True)
-    save_path = os.path.join(save_dir, filename)
-    plt.savefig(save_path, bbox_inches="tight")
-    plt.close(fig)
-    return save_path
 
 
 def plot_validation_pdfs(
@@ -1051,4 +903,80 @@ def plot_qq_quantiles(
 
     plt.savefig(save_path, bbox_inches="tight")
     plt.close(fig)
+    return save_path
+
+
+def plot_metrics_heatmap(
+    summaries,
+    metric_names,
+    filename="validation_metrics_heatmap.png",
+    save_dir="./results",
+    figsize_multiplier=4,
+):
+    """
+    Plot a heatmap of summary metrics.
+
+    Parameters
+    ----------
+    summaries : list of dict
+        Summary metrics returned by summary_metrics.
+    metric_names : list of str
+        Metrics to display.
+    filename : str, optional
+        Output filename.
+    save_dir : str, optional
+        Directory where the image is saved.
+    figsize_multiplier : float, optional
+        Controls overall figure size.
+
+    Returns
+    -------
+    str
+        Path to the saved figure.
+    """
+    dataset_names = [row["dataset"] for row in summaries]
+
+    values = np.asarray(
+        [[row.get(metric, np.nan) for metric in metric_names] for row in summaries],
+        dtype=np.float64,
+    )
+
+    fig_width = figsize_multiplier + len(metric_names)
+    fig_height = 0.6 * len(dataset_names) + figsize_multiplier / 2
+
+    fig, ax = plt.subplots(
+        figsize=(fig_width, fig_height),
+    )
+
+    sns.heatmap(
+        values,
+        ax=ax,
+        cmap="viridis",
+        annot=True,
+        fmt=".3f",
+        linewidths=0.8,
+        cbar=True,
+        xticklabels=metric_names,
+        yticklabels=dataset_names,
+    )
+
+    ax.set_title("Validation metrics")
+    ax.set_xlabel("Metric")
+    ax.set_ylabel("Dataset")
+
+    plt.tight_layout()
+
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(
+        save_dir,
+        filename,
+    )
+
+    plt.savefig(
+        save_path,
+        bbox_inches="tight",
+    )
+
+    plt.close(fig)
+
     return save_path
