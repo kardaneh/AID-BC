@@ -17,21 +17,42 @@
 ## You should have received a copy of the GNU General Public License
 ## along with SBCK.  If not, see <https://www.gnu.org/licenses/>.
 
-###############
-## Libraries ##
-###############
 
 import numpy as np
 import scipy.stats as sc
 import scipy.interpolate as sci
 
 
-#############
-## Classes ##
-#############
-
-
 class MonotoneInverse:  ##{{{
+    """
+    Numerical inverse of a monotonic transformation.
+
+    The inverse is constructed by evaluating a monotonic transformation on a
+    regularly spaced grid and interpolating the resulting values.
+
+    Parameters
+    ----------
+    xminmax : tuple of float
+        Initial lower and upper bounds of the input domain.
+    yminmax : tuple of float
+        Lower and upper bounds of the output range that must be covered.
+    transform : callable
+        Monotonic function mapping input values to output values.
+
+    Attributes
+    ----------
+    xmin : float
+        Lower bound of the input domain after automatic extension.
+    xmax : float
+        Upper bound of the input domain after automatic extension.
+    ymin : float
+        Requested lower bound of the output range.
+    ymax : float
+        Requested upper bound of the output range.
+    nstep : int
+        Number of interpolation points used to construct the inverse.
+    """
+
     def __init__(self, xminmax, yminmax, transform):  ##{{{
         self.xmin = xminmax[0]
         self.xmax = xminmax[1]
@@ -53,6 +74,19 @@ class MonotoneInverse:  ##{{{
     ##}}}
 
     def __call__(self, y):  ##{{{
+        """
+        Evaluate the numerical inverse.
+
+        Parameters
+        ----------
+        y : array-like
+            Output values of the original monotonic transformation.
+
+        Returns
+        -------
+        numpy.ndarray
+            Corresponding values in the original input domain.
+        """
         return self._inverse(y)
 
     ##}}}
@@ -79,20 +113,28 @@ class MonotoneInverse:  ##{{{
 
 class rv_histogram:  ##{{{
     """
-    SBCK.tools.rv_histogram
-    =======================
-    Empirical histogram class. The difference with scipy.stats.rv_histogram
-    is the way to infer the cdf and the icdf. Here:
+    Empirical probability distribution based on sample ranks.
 
-    >>> X ## Input
-    >>> Xs = np.sort(X)
-    >>> Xr = sc.rankdata(Xs,method="max")
-    >>> p  = np.unique(Xr) / X.size
-    >>> q  = Xs[np.unique(Xr)-1]
-    >>> p[0] = 0
-    >>>
-    >>> icdf = scipy.interpolate.interp1d( p , q )
-    >>> cdf  = scipy.interpolate.interp1d( q , p )
+    The empirical cumulative distribution function and inverse cumulative
+    distribution function are constructed from ranked observations and
+    evaluated using linear interpolation.
+
+    Parameters
+    ----------
+    cdf : callable, optional
+        Cumulative distribution function.
+    icdf : callable, optional
+        Inverse cumulative distribution function.
+    pdf : callable, optional
+        Probability density function.
+    X : array-like, optional
+        Sample observations used to estimate the empirical distribution.
+
+    Notes
+    -----
+    When X is provided, the empirical probabilities and quantiles are
+    estimated from the ranked observations. Values outside the fitted range
+    are clipped to the minimum and maximum empirical quantiles.
     """
 
     def __init__(self, cdf=None, icdf=None, pdf=None, *args, X=None, **kwargs):
@@ -110,6 +152,23 @@ class rv_histogram:  ##{{{
             self._pdf = pdf
 
     def fit(X, *args, **kwargs):
+        """
+        Fit an empirical distribution from observations.
+
+        Parameters
+        ----------
+        X : array-like
+            Sample observations used to estimate the distribution.
+
+        Returns
+        -------
+        cdf : scipy.interpolate.interp1d
+            Empirical cumulative distribution function.
+        icdf : scipy.interpolate.interp1d
+            Empirical inverse cumulative distribution function.
+        pdf : scipy.interpolate.interp1d
+            Histogram-based probability density function.
+        """
         Xs = np.sort(X.squeeze())
         Xr = sc.rankdata(Xs, method="max")
         p = np.unique(Xr) / X.size
@@ -132,24 +191,115 @@ class rv_histogram:  ##{{{
         return (cdf, icdf, pdf)
 
     def rvs(self, size):
+        """
+        Draw random samples from the empirical distribution.
+
+        Parameters
+        ----------
+        size : int or tuple of int
+            Output sample shape.
+
+        Returns
+        -------
+        numpy.ndarray
+            Random samples drawn from the empirical distribution.
+        """
         return self._icdf(np.random.uniform(size=size))
 
     def cdf(self, q):
+        """
+        Evaluate the cumulative distribution function.
+
+        Parameters
+        ----------
+        q : array-like
+            Quantile values.
+
+        Returns
+        -------
+        numpy.ndarray
+            Cumulative probabilities.
+        """
         return self._cdf(q)
 
     def icdf(self, p):
+        """
+        Evaluate the inverse cumulative distribution function.
+
+        Parameters
+        ----------
+        p : array-like
+            Cumulative probabilities.
+
+        Returns
+        -------
+        numpy.ndarray
+            Corresponding quantile values.
+        """
         return self._icdf(p)
 
     def sf(self, q):
+        """
+        Evaluate the survival function.
+
+        Parameters
+        ----------
+        q : array-like
+            Quantile values.
+
+        Returns
+        -------
+        numpy.ndarray
+            Survival probabilities.
+        """
         return 1 - self._cdf(q)
 
     def isf(self, p):
+        """
+        Evaluate the inverse survival function.
+
+        Parameters
+        ----------
+        p : array-like
+            Survival probabilities.
+
+        Returns
+        -------
+        numpy.ndarray
+            Corresponding quantile values.
+        """
         return self._icdf(1 - p)
 
     def ppf(self, p):
+        """
+        Evaluate the percent-point function.
+
+        Parameters
+        ----------
+        p : array-like
+            Cumulative probabilities.
+
+        Returns
+        -------
+        numpy.ndarray
+            Corresponding quantile values.
+        """
         return self.icdf(p)
 
     def pdf(self, x):
+        """
+        Evaluate the probability density function.
+
+        Parameters
+        ----------
+        x : array-like
+            Values at which to evaluate the density.
+
+        Returns
+        -------
+        numpy.ndarray
+            Estimated probability density.
+        """
         return self._pdf(x)
 
 
@@ -157,25 +307,49 @@ class rv_histogram:  ##{{{
 
 
 class _Dist:
+    """
+    Internal wrapper for feature-wise probability distributions.
+
+    Parameters
+    ----------
+    dist : object or sequence of objects
+        Statistical distribution used for fitting each feature.
+    kwargs : dict or None
+        Keyword arguments passed when constructing fitted distributions.
+    """
+
     def __init__(self, dist, kwargs):
         self.dist = dist if dist is not None else rv_histogram
         self.kwargs = kwargs if kwargs is not None else {}
         self.law = []
 
     def set_features(self, n_features):
+        """Configure one distribution for each feature."""
         if type(self.dist) is not list:
             self.dist = [self.dist for _ in range(n_features)]
 
     def is_frozen(self, i):
+        """Return whether feature distribution i is frozen."""
         return isinstance(self.dist[i], sc._distn_infrastructure.rv_frozen)
 
     def is_parametric(self, i):
+        """Return whether feature distribution i is parametric."""
         ispar = self.is_frozen(i)
         if len(self.law) >= i:
             ispar = ispar or isinstance(self.law[i], sc._distn_infrastructure.rv_frozen)
         return ispar
 
     def fit(self, X, i):
+        """
+        Fit the distribution associated with one feature.
+
+        Parameters
+        ----------
+        X : array-like or None
+            Sample observations for the feature.
+        i : int
+            Feature index.
+        """
         if self.is_frozen(i):
             self.law.append(self.dist[i])
         else:

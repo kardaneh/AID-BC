@@ -4,7 +4,7 @@
 # 0. Machine and runtime
 # ======================
 
-Machine="HAL"  # HAL or LEONARDO
+Machine="HAL"  # HAL, LEONARDO or AUSTRAL
 debug="False"  # True or False, Used only on LEONARDO
 
 current_ntasks=1
@@ -191,6 +191,30 @@ EOF
 # Only add ntasks if not empty.
 if [ -n "$current_ntasks" ]; then
     echo "#SBATCH --ntasks=$current_ntasks" >> "$sbatch_script"
+fi
+
+# Only add cpus-per-task if not empty.
+if [ -n "$current_cpus" ]; then
+    echo "#SBATCH --cpus-per-task=$current_cpus" >> "$sbatch_script"
+fi
+
+elif [ "$Machine" == "AUSTRAL" ]; then
+
+cat >> "$sbatch_script" <<EOF
+#SBATCH -A 2026044
+#SBATCH -p gpu_h200
+#SBATCH --time=1-00:00:00
+#SBATCH -N 1
+#SBATCH --gpus-per-node=$current_gpus
+#SBATCH --mem-per-gpu=110G
+#SBATCH --mail-user=kkingston@ipsl.fr
+#SBATCH --mail-type=END,FAIL
+EOF
+
+
+# Only add ntasks if not empty.
+if [ -n "$current_ntasks" ]; then
+    echo "#SBATCH --ntasks-per-node=$current_ntasks" >> "$sbatch_script"
 fi
 
 # Only add cpus-per-task if not empty.

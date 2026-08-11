@@ -15,7 +15,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Sinkhorn algorithm for optimal transport.
+"""
+Sinkhorn algorithm for optimal transport.
 
 References:
 
@@ -45,17 +46,25 @@ jax.config.update("jax_enable_x64", True)
 # @jax.tree_util.register_dataclass
 # @dataclasses.dataclass(kw_only=True)
 class SinkhornOutput(NamedTuple):
-    """Holds the output of a Sinkhorn solver applied to a problem.
+    """
+    Output of the Sinkhorn optimal transport solver.
 
-    Attributes:
-      potentials: The potentials for u and v, in log space.
-      cost_matrix: The cost matrix of the Sinkhorn iteration, which is the
-        distance between each pair of points.
-      epsilon: The regularization parameter for the entropic regularization.
-      reg_ot_cost: The regularized optimal transport cost.
-      threshold: The convergence threshold.
-      converged: Whether the iteration converged.
-      num_iterations: The number of iterations performed.
+    Attributes
+    ----------
+    potentials : tuple of jax.Array
+        Dual potentials associated with the source and target distributions.
+    cost_matrix : jax.Array
+        Pairwise transport cost matrix.
+    epsilon : float
+        Entropic regularization parameter.
+    reg_ot_cost : jax.Array or None
+        Regularized optimal transport cost.
+    threshold : float or None
+        Convergence threshold used by the Sinkhorn solver.
+    converged : bool or None
+        Whether the solver converged according to the configured threshold.
+    num_iterations : int or None
+        Number of Sinkhorn iterations performed.
     """
 
     potentials: tuple[Array, Array]
@@ -85,7 +94,19 @@ class SinkhornOutput(NamedTuple):
 
     @property
     def transport_plan(self) -> Array:
-        """The transport plan."""
+        """
+        Compute the transport plan from the dual potentials.
+
+        Returns
+        -------
+        jax.Array
+            Entropic transport plan.
+
+        Raises
+        ------
+        ValueError
+            If epsilon is not strictly positive.
+        """
         if self.epsilon <= 0:
             raise ValueError("Epsilon should be positive.")
         kernel = -self.cost + self.fu[:, None] + self.gv[None, :]
@@ -95,21 +116,42 @@ class SinkhornOutput(NamedTuple):
 
 
 class SinkhornSolver:
-    """Optimal Transport solver with entropic regularisation using log-sum-exp.
+    """
+    Entropy-regularized optimal transport solver using Sinkhorn iterations.
 
-    This class implements the Sinkhorn algorithm [1] for optimal transport with
-    entropic regularization. The algorithm is based on the log-sum-exp approach,
-    which provides a fast and numerically stable implementation.
+    The algorithm is implemented in log space using log-sum-exp operations
+    for improved numerical stability.
 
-    Attributes:
-      epsilon: The regularization parameter for the Sinkhorn iteration.
-      num_iterations: Maximum number of iteration for the iteration to converge.
-      metric: Function for the distance between two samples.
-      sharding: Positional sharding for the cost matrix. By default we assume that
-        there is only one accelerator.
-      threshold: Convergence threshold to stop the iteration.
-      eps_marginal: The regularization parameter for the marginal densities.
-      _solver: The jitted solver function.
+    Parameters
+    ----------
+    epsilon : float
+        Entropic regularization parameter.
+    sharding : jax.sharding.Sharding or None, optional
+        Optional JAX sharding specification for the cost matrix.
+    num_iterations : int, default=100
+        Maximum number of Sinkhorn iterations.
+    threshold : float, default=1e-3
+        Convergence threshold based on changes in the dual potentials.
+    metric : callable, optional
+        Element-wise cost function. The default is the squared difference.
+    eps_marginal : float, default=1e-12
+        Small positive value added to marginal densities before taking
+        logarithms.
+
+    Attributes
+    ----------
+    epsilon : float
+        Entropic regularization parameter.
+    num_iterations : int
+        Maximum number of Sinkhorn iterations.
+    metric : callable
+        Element-wise cost function.
+    sharding : jax.sharding.Sharding or None
+        Optional sharding specification.
+    threshold : float
+        Convergence threshold.
+    eps_marginal : float
+        Numerical stabilization constant for marginal densities.
     """
 
     def __init__(
@@ -130,19 +172,45 @@ class SinkhornSolver:
         self._solver = jax.jit(self._forward_solve)
 
     def __call__(self, x: Array, y: Array) -> SinkhornOutput:
+        """
+        Solve the optimal transport problem between two point clouds.
+
+        Parameters
+        ----------
+        x : jax.Array
+            Source samples with shape (n_source, n_features).
+        y : jax.Array
+            Target samples with shape (n_target, n_features).
+
+        Returns
+        -------
+        SinkhornOutput
+            Sinkhorn solution containing dual potentials, cost matrix,
+            regularized transport cost, convergence state, and iteration count.
+        """
         return self._solver(x, y)
 
     def _forward_solve(self, x: Array, y: Array) -> SinkhornOutput:
-        """Computation of the cost and the coupling matrix.
+        """
+        Compute the entropy-regularized optimal transport solution.
 
-        Args:
-          x: Collection of points of set A.
-          y: Collection of point of set B.
+        Parameters
+        ----------
+        x : jax.Array
+            Source samples with shape (n_source, n_features).
+        y : jax.Array
+            Target samples with shape (n_target, n_features).
 
-        Returns:
-          An instance of SinkhornOutput, which is a named tuple containing the cost
-          of the minimizer, the cost matrix, the potentials in log space, and the
-          number of iterations required for convergence.
+        Returns
+        -------
+        SinkhornOutput
+            Solver output containing the dual potentials, cost matrix,
+            convergence information, and regularized transport cost.
+
+        Raises
+        ------
+        ValueError
+            If x or y is not two-dimensional.
         """
         # We assume that x and y are 2d arrays. First dimension is the number of
         # points, and second dimension is the feature dimension.
@@ -296,6 +364,18 @@ class SinkhornSolver:
 
         C[i, j] = ||x[i] - y[j]||²
                 = ||x[i]||² + ||y[j]||² - 2 x[i]·y[j]
+
+        Parameters
+        ----------
+        x : jax.Array
+            First collection of samples with shape (n_x, n_features).
+        y : jax.Array
+            Second collection of samples with shape (n_y, n_features).
+
+        Returns
+        -------
+        jax.Array
+            Cost matrix with shape (n_x, n_y).
         """
         x_squared_norm = jnp.sum(
             jnp.square(x),
@@ -317,17 +397,22 @@ class SinkhornSolver:
         return jnp.maximum(cost_matrix, 0.0)
 
     def _log_gibbs_kernel(self, u: Array, v: Array, cost_matrix: Array) -> Array:
-        """Computes the kernel K = diag(u) exp(-C/eps) diag(v) in log space.
+        """
+        Computes the kernel K = diag(u) exp(-C/eps) diag(v) in log space.
 
-        Args:
-          u: The left potential in log space.
-          v: The right potential in log space.
-          cost_matrix: The cost matrix of the Sinkhorn iteration.
+        Parameters
+        ----------
+        u : jax.Array
+            Source dual potential.
+        v : jax.Array
+            Target dual potential.
+        cost_matrix : jax.Array
+            Pairwise transport cost matrix.
 
-        Returns:
-          The rescaled gibbs kernel matrix diag(u) K diag(v) in log space, where K
-          is exp(-C/epsilon). This is performed in log space to avoid numerical
-          issues.
+        Returns
+        -------
+        jax.Array
+            Logarithm of the rescaled Gibbs kernel.
         """
         kernel = -cost_matrix + u[:, None] + v[None, :]
         kernel /= self.epsilon
@@ -336,7 +421,8 @@ class SinkhornSolver:
     def transport_fn(
         self, potential: Array, y: Array, weights: Array | None = None
     ) -> Callable[[Array], Array]:
-        r"""Transport functions using the formulation in the proposition 2 of [2].
+        r"""
+        Transport functions using the formulation in the proposition 2 of [2].
 
         We use the fact that the transport function can be written as:
 
@@ -344,13 +430,20 @@ class SinkhornSolver:
 
         where f_{\epsilon}(x) is the potential computed using the Eq. 9 in [2].
 
-        Args:
-          potential: The potential g (or f) given by the Sinkhorn algorithm.
-          y: Collection of point of set B, associated with the potential.
-          weights: Quadrature weights (or marginal densities) for the y points.
+        Parameters
+        ----------
+        potential : jax.Array
+            Dual potential associated with the target samples.
+        y : jax.Array
+            Target samples associated with the potential.
+        weights : jax.Array or None, optional
+            Marginal weights associated with the target samples. Uniform weights
+            are used internally when needed by the potential function.
 
-        Returns:
-          A function that computes the transport function at a given x.
+        Returns
+        -------
+        callable
+            Function mapping source samples to transported samples.
         """
 
         # Computes the potential of set A.
@@ -384,14 +477,27 @@ class SinkhornSolver:
 
         here b_i is the marginal density of set B (associated with y_i).
 
-        Args:
-          x: Collection of points of set A where f_{\epsilon} will be computed at.
-          potential: Potential of set B.
-          y: Collection of point of set B.
-          weights: Quadrature weights (or marginal densities) for the y points.
+        Parameters
+        ----------
+        x : jax.Array
+            Samples where the potential is evaluated.
+        potential : jax.Array
+            Dual potential associated with the target samples.
+        y : jax.Array
+            Target samples.
+        weights : jax.Array or None, optional
+            Marginal weights associated with the target samples. Uniform weights
+            are used when None.
 
-        Returns:
-          The potential of set A.
+        Returns
+        -------
+        jax.Array
+            Evaluated entropic potential.
+
+        Raises
+        ------
+        ValueError
+            If x and y do not have the same feature dimension.
         """
         x = jnp.atleast_2d(x)
 
@@ -414,7 +520,29 @@ class SinkhornSolver:
     def transport_fn_direct(
         self, potential: Array, y: Array, weights: Array | None
     ) -> Callable[[Array], Array]:
-        """Transport directly (not very stable). Using the formulas in [1]."""
+        """
+        Transport directly (not very stable). Using the formulas in [1].
+
+        Parameters
+        ----------
+        potential : jax.Array
+            One-dimensional target dual potential.
+        y : jax.Array
+            Target samples associated with the potential.
+        weights : jax.Array or None
+            Marginal weights associated with the target samples.
+
+        Returns
+        -------
+        callable
+            Function mapping one source sample to its transported value.
+
+        Raises
+        ------
+        ValueError
+            If potential is not one-dimensional or if its length differs from
+            the number of target samples.
+        """
         if potential.ndim != 1:
             raise ValueError(
                 "The potential should be a vector, but its dimension are not one,"
