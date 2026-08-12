@@ -15,6 +15,7 @@ from AID_BC.diagnostics import (
     plot_qq_quantiles,
     plot_validation_pdfs,
     plot_metrics_heatmap,
+    plot_surface,
 )
 
 
@@ -222,6 +223,9 @@ def evaluate(
     raw_arrays = []
     corrected_arrays = []
 
+    lat_1d = reference["latitude"].values
+    lon_1d = reference["longitude"].values
+
     for variable_name in variable_names:
         reference_variable = reference[variable_name]
         raw_variable = raw[variable_name]
@@ -310,5 +314,32 @@ def evaluate(
         save_dir=str(result_dir),
         save_npz=True,
     )
+
+    num_time_steps_to_plot = min(3, reference.sizes["time"])
+    for time_idx in range(num_time_steps_to_plot):
+        reference_single_time = [
+            x.isel(time=slice(time_idx, time_idx + 1)) for x in reference_arrays
+        ]
+
+        raw_single_time = [
+            x.isel(time=slice(time_idx, time_idx + 1)) for x in raw_arrays
+        ]
+
+        corrected_single_time = [
+            x.isel(time=slice(time_idx, time_idx + 1)) for x in corrected_arrays
+        ]
+
+        save_path = plot_surface(
+            predictions=corrected_single_time,
+            targets=reference_single_time,
+            coarse_inputs=raw_single_time,
+            lat_1d=lat_1d,
+            lon_1d=lon_1d,
+            variable_names=list(variable_names),
+            filename=f"surface_time_{time_idx:03d}.png",
+            save_dir=str(result_dir),
+        )
+
+        logger.info(f"Saved surface plot for time step {time_idx} to: {save_path}")
 
     logger.success(f"Evaluation completed for year {year}: {result_dir}")

@@ -8,6 +8,7 @@
 
 import os
 
+from datetime import datetime
 import matplotlib as mpl
 import numpy as np
 import unittest
@@ -24,6 +25,7 @@ from AID_BC.diagnostics import (
     plot_validation_pdfs,
     plot_power_spectra,
     plot_qq_quantiles,
+    plot_surface,
 )
 
 # python -m unittest tests.test_diagnostics
@@ -114,6 +116,26 @@ class PlotConfig:
         "default": "viridis",
     }
 
+    # Fixed visualization ranges for error diagnostics
+    FIXED_DIFF_RANGES = {
+        "T2M": (-5.0, 5.0),  # K
+        "temperature": (-5.0, 5.0),
+        "2t": (-5.0, 5.0),
+        "VAR_2T": (-5.0, 5.0),
+        "U10": (-5.0, 5.0),  # m/s
+        "10u": (-5.0, 5.0),
+        "meridional": (-5.0, 5.0),
+        "VAR_10U": (-5.0, 5.0),
+        "V10": (-5.0, 5.0),  # m/s
+        "10v": (-5.0, 5.0),
+        "VAR_10V": (-5.0, 5.0),
+        "TP": (-0.5, 0.5),  # mm/h
+        "tp": (-0.5, 0.5),
+        "VAR_TP": (-0.5, 0.5),
+        "VAR_D2M": (-5.0, 5.0),  # K
+        "VAR_ST": (-5.0, 5.0),  # K
+    }
+
     # Geographic features
     COASTLINE_w = 0.5
     BORDER_w = 0.5
@@ -178,6 +200,11 @@ class PlotConfig:
         if name in ["tp", "var_tp", "precipitation"]:
             return data * 1000.0  # m to mm
         return data
+
+    @staticmethod
+    def get_fixed_diff_range(var_name):
+        """Get fixed visualization range for signed differences (Prediction − Truth)."""
+        return PlotConfig.FIXED_DIFF_RANGES.get(var_name, None)
 
 
 # ============================================================================
@@ -471,6 +498,87 @@ class TestPlottingFunctions(unittest.TestCase):
 
         if self.logger:
             self.logger.info("✅ All QQ-quantiles tests passed")
+
+    def test_plot_surface_comprehensive(self):
+        """Comprehensive test for surface plots."""
+        if self.logger:
+            self.logger.info("Testing surface plots comprehensively")
+
+        # Test case 1: Standard configuration
+        lat_1d = np.linspace(30, 50, 48)
+        lon_1d = np.linspace(-120, -80, 68)
+
+        # Create synthetic data
+        batch_size = 1
+        n_vars = 3
+        h, w = 48, 68
+
+        # Create spatial patterns
+        x = np.linspace(0, 3 * np.pi, w)
+        y = np.linspace(0, 3 * np.pi, h)
+        X, Y = np.meshgrid(x, y)
+
+        # Initialize arrays
+        coarse_inputs = np.zeros((batch_size, n_vars, h, w))
+        targets = np.zeros((batch_size, n_vars, h, w))
+        pred = np.zeros((batch_size, n_vars, h, w))
+
+        base_patterns = [
+            np.sin(X / 2) * np.cos(Y / 2),
+            np.exp(-0.01 * (X - 24) ** 2 - 0.01 * (Y - 24) ** 2),
+            X * Y / 200,
+        ]
+
+        for i in range(n_vars):
+            base_pattern = base_patterns[i % len(base_patterns)]
+            pattern = base_pattern * 20 + 280  # Temperature-like
+
+            coarse_inputs[0, i] = pattern + np.random.randn(h, w) * 2
+            targets[0, i] = pattern + np.random.randn(h, w) * 1
+            pred[0, i] = targets[0, i] + np.random.randn(h, w) * 0.3
+
+        variable_names = ["Temp", "Press", "Humid"]
+        timestamp = datetime(2024, 1, 1, 12, 0)
+
+        # Test with numpy arrays
+        expected_path = plot_surface(
+            coarse_inputs=coarse_inputs,
+            targets=targets,
+            predictions=pred,
+            lat_1d=lat_1d,
+            lon_1d=lon_1d,
+            timestamp=timestamp,
+            variable_names=variable_names,
+            filename="plot_surface_standard.png",
+            save_dir=self.output_dir,
+        )
+        self.assertTrue(
+            os.path.exists(expected_path), f"File not found: {expected_path}"
+        )
+
+        # Test with PyTorch tensors
+        coarse_inputs_tensor = torch.from_numpy(coarse_inputs.copy())
+        targets_tensor = torch.from_numpy(targets.copy())
+        pred_tensor = torch.from_numpy(pred.copy())
+
+        expected_path = plot_surface(
+            coarse_inputs=coarse_inputs_tensor,
+            targets=targets_tensor,
+            predictions=pred_tensor,
+            lat_1d=lat_1d,
+            lon_1d=lon_1d,
+            timestamp=timestamp,
+            variable_names=variable_names,
+            filename="plot_surface_torch.png",
+            save_dir=self.output_dir,
+        )
+
+        self.assertTrue(
+            os.path.exists(expected_path), f"File not found: {expected_path}"
+        )
+
+        if self.logger:
+            self.logger.info("✅ All surface plot tests passed")
 
 
 def run_tests():

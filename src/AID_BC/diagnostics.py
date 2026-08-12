@@ -15,6 +15,9 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+
 
 # ---------------------------------------------
 # COMPLETE MATPLOTLIB STYLE CONFIGURATION
@@ -102,6 +105,26 @@ class PlotConfig:
         "default": "viridis",
     }
 
+    # Fixed visualization ranges for error diagnostics
+    FIXED_DIFF_RANGES = {
+        "T2M": (-5.0, 5.0),  # K
+        "temperature": (-5.0, 5.0),
+        "2t": (-5.0, 5.0),
+        "VAR_2T": (-5.0, 5.0),
+        "U10": (-5.0, 5.0),  # m/s
+        "10u": (-5.0, 5.0),
+        "meridional": (-5.0, 5.0),
+        "VAR_10U": (-5.0, 5.0),
+        "V10": (-5.0, 5.0),  # m/s
+        "10v": (-5.0, 5.0),
+        "VAR_10V": (-5.0, 5.0),
+        "TP": (-0.5, 0.5),  # mm/h
+        "tp": (-0.5, 0.5),
+        "VAR_TP": (-0.5, 0.5),
+        "VAR_D2M": (-5.0, 5.0),  # K
+        "VAR_ST": (-5.0, 5.0),  # K
+    }
+
     # Geographic features
     COASTLINE_w = 0.5
     BORDER_w = 0.5
@@ -166,6 +189,11 @@ class PlotConfig:
         if name in ["tp", "var_tp", "precipitation"]:
             return data * 1000.0  # m to mm
         return data
+
+    @staticmethod
+    def get_fixed_diff_range(var_name):
+        """Get fixed visualization range for signed differences (Prediction − Truth)."""
+        return PlotConfig.FIXED_DIFF_RANGES.get(var_name, None)
 
 
 def to_numpy_4d(data):
@@ -979,4 +1007,303 @@ def plot_metrics_heatmap(
 
     plt.close(fig)
 
+    return save_path
+
+
+def plot_surface(
+    predictions,
+    targets,
+    coarse_inputs,
+    lat_1d,
+    lon_1d,
+    timestamp=None,
+    variable_names=None,
+    filename="forecast_plot.png",
+    save_dir=None,
+    figsize_multiplier=None,
+):
+    """
+    Plot side-by-side forecast maps (coarse_inputs input, true target, model prediction, and difference)
+    for one or more meteorological variables over a geographic domain.
+
+    Parameters
+    ----------
+    coarse_inputs : torch.Tensor or np.ndarray
+        coarse_inputs-resolution input data with shape [1, n_vars, H, W].
+    targets : torch.Tensor or np.ndarray
+        Ground-truth high-resolution data with shape [1, n_vars, H, W].
+    predictions : torch.Tensor or np.ndarray
+        Model predictions at targets resolution with shape [1, n_vars, H, W].
+    lat_1d : array-like
+        1D array of latitude coordinates with shape [H].
+    lon_1d : array-like
+        1D array of longitude coordinates with shape [W].
+    timestamp : datetime.datetime
+        Forecast timestamp to include in the plot title.
+    variable_names : list of str, optional
+        Variable names or identifiers.
+    filename : str, optional
+        Output filename for saving the plot.
+    save_dir : str, optional
+        Directory to save the plot.
+    figsize_multiplier : int, optional
+        Base size multiplier for subplots.
+
+    Returns
+    -------
+    None
+    """
+
+    # Use defaults from config if not provided
+    if save_dir is None:
+        save_dir = PlotConfig.DEFAULT_SAVE_DIR
+    if figsize_multiplier is None:
+        figsize_multiplier = PlotConfig.DEFAULT_FIGSIZE_MULTIPLIER
+
+    # Convert tensors, NumPy arrays, or xarray objects to NumPy 4D arrays
+    predictions = to_numpy_4d(predictions)
+    targets = to_numpy_4d(targets)
+    coarse_inputs = to_numpy_4d(coarse_inputs)
+
+    # Create 2D meshgrid from 1D coordinates
+    lat_min, lat_max = lat_1d.min(), lat_1d.max()
+    lon_min, lon_max = lon_1d.min(), lon_1d.max()
+
+    # Shape
+    h, w = coarse_inputs[0, 0].shape
+    lat_block = np.linspace(lat_max, lat_min, h)
+    lon_block = np.linspace(lon_min, lon_max, w)
+    lat, lon = np.meshgrid(lat_block, lon_block, indexing="ij")
+
+    # Projection center
+    lon_center = float((lon_min + lon_max) / 2)
+
+    # Check data dimensions
+    n_vars = coarse_inputs.shape[1]
+    if targets.shape[1] != n_vars:
+        raise ValueError(
+            f"targets data has {targets.shape[1]} variables but coarse_inputs has {n_vars}"
+        )
+    if predictions.shape[1] != n_vars:
+        raise ValueError(
+            f"predictions data has {predictions.shape[1]} variables but coarse_inputs has {n_vars}"
+        )
+
+    # Default variable names if not provided
+    if variable_names is None:
+        variable_names = [f"VAR_{i}" for i in range(n_vars)]
+
+    # Derive plot names and colormaps
+    plot_variable_names = [PlotConfig.get_plot_name(var) for var in variable_names]
+    cmaps = [PlotConfig.get_colormap(var) for var in variable_names]
+
+    # Derive vmin/vmax from data for each variable (for coarse_inputs, truth, prediction)
+    vmin_list = []
+    vmax_list = []
+
+    # Derive vmin/vmax for difference plots (signed difference)
+    diff_vmin_list = []
+    diff_vmax_list = []
+
+    for i in range(n_vars):
+        var_name = variable_names[i]
+
+        coarse_i = PlotConfig.convert_units(var_name, coarse_inputs[0, i])
+        target_i = PlotConfig.convert_units(var_name, targets[0, i])
+        pred_i = PlotConfig.convert_units(var_name, predictions[0, i])
+
+        all_data = np.concatenate(
+            [coarse_i.flatten(), target_i.flatten(), pred_i.flatten()]
+        )
+
+        # Calculate vmin/vmax (using quantile approach like original function)
+        all_data_flat = all_data[~np.isnan(all_data)]
+        if len(all_data_flat) > 0:
+            q_low, q_high = np.quantile(all_data_flat, [0.02, 0.98])
+            vmin, vmax = float(q_low), float(q_high)
+        else:
+            vmin, vmax = -1, 1
+
+        # Ensure vmin < vmax
+        if vmin >= vmax:
+            vmin, vmax = float(np.nanmin(all_data)), float(np.nanmax(all_data))
+
+        vmin_list.append(vmin)
+        vmax_list.append(vmax)
+
+        # Calculate signed difference between prediction and truth
+        fixed_range = PlotConfig.get_fixed_diff_range(var_name)
+        diff_data = (predictions[0, i] - targets[0, i]).flatten()
+        diff_data = diff_data[~np.isnan(diff_data)]
+
+        if fixed_range is not None:
+            diff_vmin, diff_vmax = fixed_range
+        else:
+            if len(diff_data) > 0:
+                # For signed difference, we want symmetric range around 0
+                max_abs_diff = np.max(np.abs(diff_data))
+                diff_vmin = -max_abs_diff * 1.1  # Add 10% padding
+                diff_vmax = max_abs_diff * 1.1  # Add 10% padding
+
+                # If all differences are zero or very small
+                if diff_vmax <= 0.001:
+                    diff_vmin, diff_vmax = -0.1, 0.1
+            else:
+                diff_vmin, diff_vmax = -1, 1
+
+        diff_vmin_list.append(diff_vmin)
+        diff_vmax_list.append(diff_vmax)
+
+    # Use fixed figure size instead of geo_ratio calculation
+    # This ensures rectangular panels regardless of location
+    base_width_per_panel = 4.5  # Same as original scale
+    base_height_per_panel = 3.0  # Keep this as is
+
+    fig_width = base_width_per_panel * n_vars
+    fig_height = base_height_per_panel * 4  # 4 rows
+
+    # Set up figure
+    fig, axes = plt.subplots(
+        4,
+        n_vars,  # 4 rows, n_vars columns
+        figsize=(fig_width, fig_height),
+        subplot_kw={
+            "projection": ccrs.PlateCarree(central_longitude=lon_center)
+        },  # ccrs.Mercator(central_longitude=lon_center)
+        gridspec_kw={"wspace": 0.1, "hspace": 0.1},  # Keep spacing
+        squeeze=False,
+    )
+
+    # Main title
+    if timestamp is not None:
+        #    fig.suptitle(
+        #        f"Forecast for {timestamp.strftime('%Y-%m-%d %H:%M')}",
+        #        fontsize=16, y=1.02
+        #    )
+        print(f"Forecast for {timestamp.strftime('%Y-%m-%d %H:%M')}")
+
+    # Plot each variable
+    for col_idx in range(n_vars):
+        var_name = variable_names[col_idx]
+        # plot_name = plot_variable_names[col_idx]
+
+        coarse_inputs_data = PlotConfig.convert_units(
+            var_name, coarse_inputs[0, col_idx]
+        )
+        targets_data = PlotConfig.convert_units(var_name, targets[0, col_idx])
+        pred_data = PlotConfig.convert_units(var_name, predictions[0, col_idx])
+
+        diff_data = pred_data - targets_data  # Signed difference (pred - truth)
+
+        # Store image objects for rows that need colorbars
+        im_coar = None
+        im_diff = None
+
+        # Process all rows
+        for row_idx in range(4):
+            ax = axes[row_idx, col_idx]
+
+            # Select data based on row
+            if row_idx == 0:
+                data = coarse_inputs_data
+                vmin, vmax = vmin_list[col_idx], vmax_list[col_idx]
+                cmap = cmaps[col_idx]
+            elif row_idx == 1:
+                data = targets_data
+                vmin, vmax = vmin_list[col_idx], vmax_list[col_idx]
+                cmap = cmaps[col_idx]
+            elif row_idx == 2:
+                data = pred_data
+                vmin, vmax = vmin_list[col_idx], vmax_list[col_idx]
+                cmap = cmaps[col_idx]
+            else:  # row_idx == 3
+                data = diff_data
+                vmin, vmax = diff_vmin_list[col_idx], diff_vmax_list[col_idx]
+                cmap = "RdBu_r"  # Diverging colormap for differences
+
+            # Create the plot
+            im = ax.pcolormesh(
+                lon,
+                lat,
+                data,
+                vmin=vmin,
+                vmax=vmax,
+                cmap=cmap,
+                transform=ccrs.PlateCarree(),
+                shading="auto",
+            )
+
+            # Store image objects for rows that need colorbars
+            if row_idx == 0:
+                im_coar = im
+            elif row_idx == 3:
+                im_diff = im
+
+            # Set extent and features
+            ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
+
+            ax.coastlines(linewidth=0.6)
+            ax.add_feature(
+                cfeature.BORDERS.with_scale("50m"),
+                linewidth=0.9,
+                linestyle="--",
+                edgecolor="black",
+                zorder=11,
+            )
+            ax.add_feature(
+                cfeature.LAKES.with_scale("50m"),
+                edgecolor="black",
+                facecolor="none",
+                linewidth=0.9,
+                zorder=9,
+            )
+            # ax.set_aspect("auto")  # CRITICAL: This makes panels rectangular regardless of projection
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+        # Add colorbar for PREDICTION row (row 2)
+        if im_coar is not None:
+            ax_coar = axes[0, col_idx]
+            # Position at top of panel: [x, y, width, height] where y > 1.0 places it above
+            cax_top = ax_coar.inset_axes([0.1, 1.05, 0.8, 0.05])
+            cbar = fig.colorbar(im_coar, cax=cax_top, orientation="horizontal")
+            cbar.set_label(f"{plot_variable_names[col_idx]}")
+            cax_top.xaxis.set_ticks_position("top")
+            cax_top.xaxis.set_label_position("top")
+
+        # Add colorbar for DIFFERENCE row (row 3)
+        if im_diff is not None:
+            ax_diff = axes[3, col_idx]
+            cax_diff = ax_diff.inset_axes([0.1, -0.12, 0.8, 0.05])
+            fig.colorbar(
+                im_diff,
+                cax=cax_diff,
+                orientation="horizontal",
+                label=f"Δ {plot_variable_names[col_idx]} (Pred - Truth)",
+            )
+
+    # Add row labels on the left side
+    row_labels = ["Coarse", "Truth", "Prediction", "Pred - Truth"]
+    for row_idx, label in enumerate(row_labels):
+        axes[row_idx, 0].text(
+            -0.12,
+            0.5,
+            label,
+            transform=axes[row_idx, 0].transAxes,
+            va="center",
+            ha="right",
+            rotation="vertical",
+            fontsize=12,
+        )
+
+    # Adjust layout - give more room at bottom for colorbars
+    fig.subplots_adjust(
+        top=0.90, bottom=0.25, left=0.10, right=0.95, wspace=0.1, hspace=0.15
+    )
+
+    # Save figure
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, filename)
+    plt.savefig(save_path, bbox_inches="tight")
+    plt.close(fig)
     return save_path
