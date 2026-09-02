@@ -1,492 +1,165 @@
-# -*- coding: utf-8 -*-
-
-## Copyright(c) 2021 Yoann Robin
-##
-## This file is part of SBCK.
-##
-## SBCK is free software: you can redistribute it and/or modify
-## it under the terms of the GNU General Public License as published by
-## the Free Software Foundation, either version 3 of the License, or
-## (at your option) any later version.
-##
-## SBCK is distributed in the hope that it will be useful,
-## but WITHOUT ANY WARRANTY; without even the implied warranty of
-## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-## GNU General Public License for more details.
-##
-## You should have received a copy of the GNU General Public License
-## along with SBCK.  If not, see <https://www.gnu.org/licenses/>.
-
+# Copyright 2026 IPSL / CNRS / Sorbonne University
+# Authors: Kishanthan Kingston
+#
+# This work is licensed under the Creative Commons
+# Attribution-NonCommercial-ShareAlike 4.0 International License.
+# To view a copy of this license, visit
+# http://creativecommons.org/licenses/by-nc-sa/4.0/
 
 import numpy as np
-import scipy.stats as sc
-import scipy.interpolate as sci
-
-
-class MonotoneInverse:  ##{{{
-    """
-    Numerical inverse of a monotonic transformation.
-
-    The inverse is constructed by evaluating a monotonic transformation on a
-    regularly spaced grid and interpolating the resulting values.
-
-    Parameters
-    ----------
-    xminmax : tuple of float
-        Initial lower and upper bounds of the input domain.
-    yminmax : tuple of float
-        Lower and upper bounds of the output range that must be covered.
-    transform : callable
-        Monotonic function mapping input values to output values.
-
-    Attributes
-    ----------
-    xmin : float
-        Lower bound of the input domain after automatic extension.
-    xmax : float
-        Upper bound of the input domain after automatic extension.
-    ymin : float
-        Requested lower bound of the output range.
-    ymax : float
-        Requested upper bound of the output range.
-    nstep : int
-        Number of interpolation points used to construct the inverse.
-    """
-
-    def __init__(self, xminmax, yminmax, transform):  ##{{{
-        self.xmin = xminmax[0]
-        self.xmax = xminmax[1]
-        self.ymin = yminmax[0]
-        self.ymax = yminmax[1]
-        delta = 0.05 * (self.xmax - self.xmin)
-        nstepmin, nstepmax = 0, 0
-        while transform(self.xmin) > self.ymin:
-            self.xmin -= delta
-            nstepmin += 1
-        while transform(self.xmax) < self.ymax:
-            self.xmax += delta
-            nstepmax += 1
-        self.nstep = 100 + max(nstepmin, nstepmax)
-        x = np.linspace(self.xmin, self.xmax, self.nstep)
-        y = transform(x)
-        self._inverse = sci.interp1d(y, x)
-
-    ##}}}
-
-    def __call__(self, y):  ##{{{
-        """
-        Evaluate the numerical inverse.
-
-        Parameters
-        ----------
-        y : array-like
-            Output values of the original monotonic transformation.
-
-        Returns
-        -------
-        numpy.ndarray
-            Corresponding values in the original input domain.
-        """
-        return self._inverse(y)
-
-    ##}}}
-
-
-##}}}
-
-# class rv_histogram(sc.rv_histogram):##{{{
-#   """
-#   SBCK.tools.rv_histogram
-#   =======================
-#   Wrapper on scipy.stats.rv_histogram adding a fit method.
-#   """
-#   def __init__( self , *args , **kwargs ):##{{{
-#       sc.rv_histogram.__init__( self , *args , **kwargs )
-#   ##}}}
-#
-#   def fit( X , bins = 100 ):##{{{
-#       return (np.histogram( X , bins = bins ),)
-#   ##}}}
-#
-###}}}
-
-
-class rv_histogram:  ##{{{
-    """
-    Empirical probability distribution based on sample ranks.
-
-    The empirical cumulative distribution function and inverse cumulative
-    distribution function are constructed from ranked observations and
-    evaluated using linear interpolation.
-
-    Parameters
-    ----------
-    cdf : callable, optional
-        Cumulative distribution function.
-    icdf : callable, optional
-        Inverse cumulative distribution function.
-    pdf : callable, optional
-        Probability density function.
-    X : array-like, optional
-        Sample observations used to estimate the empirical distribution.
-
-    Notes
-    -----
-    When X is provided, the empirical probabilities and quantiles are
-    estimated from the ranked observations. Values outside the fitted range
-    are clipped to the minimum and maximum empirical quantiles.
-    """
-
-    def __init__(self, cdf=None, icdf=None, pdf=None, *args, X=None, **kwargs):
-        self._cdf = None
-        self._icdf = None
-        self._pdf = None
-        if cdf is not None and icdf is not None and pdf is not None:
-            self._cdf = cdf
-            self._icdf = icdf
-            self._pdf = pdf
-        elif X is not None:
-            cdf, icdf, pdf = rv_histogram.fit(X)
-            self._cdf = cdf
-            self._icdf = icdf
-            self._pdf = pdf
-
-    def fit(X, *args, **kwargs):
-        """
-        Fit an empirical distribution from observations.
-
-        Parameters
-        ----------
-        X : array-like
-            Sample observations used to estimate the distribution.
-
-        Returns
-        -------
-        cdf : scipy.interpolate.interp1d
-            Empirical cumulative distribution function.
-        icdf : scipy.interpolate.interp1d
-            Empirical inverse cumulative distribution function.
-        pdf : scipy.interpolate.interp1d
-            Histogram-based probability density function.
-        """
-        Xs = np.sort(X.squeeze())
-        Xr = sc.rankdata(Xs, method="max")
-        p = np.unique(Xr) / X.size
-        q = Xs[np.unique(Xr) - 1]
-
-        p[0] = 0
-        #       p  = np.hstack( (0,p) )
-        #       q  = np.hstack( (X.min(),q) )
-        #       if q[0] == q[1]:
-        #           eps  = np.sqrt(np.finfo(float).resolution)
-        #           q[1] = (1-eps) * q[0] + eps * q[2]
-
-        icdf = sci.interp1d(p, q, bounds_error=False, fill_value=(q[0], q[-1]))
-        cdf = sci.interp1d(q, p, bounds_error=False, fill_value=(0, 1))
-
-        h, c = np.histogram(X, int(0.1 * X.size), density=True)
-        c = (c[1:] + c[:-1]) / 2
-        pdf = sci.interp1d(c, h, bounds_error=False, fill_value=(0, 0))
-
-        return (cdf, icdf, pdf)
-
-    def rvs(self, size):
-        """
-        Draw random samples from the empirical distribution.
-
-        Parameters
-        ----------
-        size : int or tuple of int
-            Output sample shape.
-
-        Returns
-        -------
-        numpy.ndarray
-            Random samples drawn from the empirical distribution.
-        """
-        return self._icdf(np.random.uniform(size=size))
-
-    def cdf(self, q):
-        """
-        Evaluate the cumulative distribution function.
-
-        Parameters
-        ----------
-        q : array-like
-            Quantile values.
-
-        Returns
-        -------
-        numpy.ndarray
-            Cumulative probabilities.
-        """
-        return self._cdf(q)
-
-    def icdf(self, p):
-        """
-        Evaluate the inverse cumulative distribution function.
-
-        Parameters
-        ----------
-        p : array-like
-            Cumulative probabilities.
-
-        Returns
-        -------
-        numpy.ndarray
-            Corresponding quantile values.
-        """
-        return self._icdf(p)
-
-    def sf(self, q):
-        """
-        Evaluate the survival function.
-
-        Parameters
-        ----------
-        q : array-like
-            Quantile values.
-
-        Returns
-        -------
-        numpy.ndarray
-            Survival probabilities.
-        """
-        return 1 - self._cdf(q)
-
-    def isf(self, p):
-        """
-        Evaluate the inverse survival function.
-
-        Parameters
-        ----------
-        p : array-like
-            Survival probabilities.
-
-        Returns
-        -------
-        numpy.ndarray
-            Corresponding quantile values.
-        """
-        return self._icdf(1 - p)
-
-    def ppf(self, p):
-        """
-        Evaluate the percent-point function.
-
-        Parameters
-        ----------
-        p : array-like
-            Cumulative probabilities.
-
-        Returns
-        -------
-        numpy.ndarray
-            Corresponding quantile values.
-        """
-        return self.icdf(p)
-
-    def pdf(self, x):
-        """
-        Evaluate the probability density function.
-
-        Parameters
-        ----------
-        x : array-like
-            Values at which to evaluate the density.
-
-        Returns
-        -------
-        numpy.ndarray
-            Estimated probability density.
-        """
-        return self._pdf(x)
-
-
-##}}}
-
-
-class _Dist:
-    """
-    Internal wrapper for feature-wise probability distributions.
-
-    Parameters
-    ----------
-    dist : object or sequence of objects
-        Statistical distribution used for fitting each feature.
-    kwargs : dict or None
-        Keyword arguments passed when constructing fitted distributions.
-    """
-
-    def __init__(self, dist, kwargs):
-        self.dist = dist if dist is not None else rv_histogram
-        self.kwargs = kwargs if kwargs is not None else {}
-        self.law = []
-
-    def set_features(self, n_features):
-        """Configure one distribution for each feature."""
-        if type(self.dist) is not list:
-            self.dist = [self.dist for _ in range(n_features)]
-
-    def is_frozen(self, i):
-        """Return whether feature distribution i is frozen."""
-        return isinstance(self.dist[i], sc._distn_infrastructure.rv_frozen)
-
-    def is_parametric(self, i):
-        """Return whether feature distribution i is parametric."""
-        ispar = self.is_frozen(i)
-        if len(self.law) >= i:
-            ispar = ispar or isinstance(self.law[i], sc._distn_infrastructure.rv_frozen)
-        return ispar
-
-    def fit(self, X, i):
-        """
-        Fit the distribution associated with one feature.
-
-        Parameters
-        ----------
-        X : array-like or None
-            Sample observations for the feature.
-        i : int
-            Feature index.
-        """
-        if self.is_frozen(i):
-            self.law.append(self.dist[i])
-        else:
-            self.law.append(self.dist[i](*self.dist[i].fit(X.squeeze()), **self.kwargs))
 
 
 class QM:
     """
-    SBCK.QM
-    =======
+    Basic empirical Quantile Mapping bias corrector.
 
-    Description
-    -----------
-    Quantile Mapping bias corrector, see e.g. [1,2,3]. The implementation proposed here is generic, and can use
-    scipy.stats to fit a parametric distribution, or can use a frozen distribution.
+    Given a reference dataset Y0 and a biased dataset X0, this estimates the
+    empirical cumulative distribution function (CDF) of each, feature by
+    feature, and corrects biased values by matching their quantiles to those
+    of the reference distribution.
 
-    Example
-    -------
-    ```
-    ## Start with a reference / biased dataset, noted Y,X, from normal distribution:
-    X = np.random.normal( loc = 0 , scale = 2   , size = 1000 )
-    Y = np.random.normal( loc = 5 , scale = 0.5 , size = 1000 )
-
-    ## Generally, we do not know the distribution of X and Y, and we use the empirical quantile mapping:
-    qm_empiric = QM( distY0 = SBCK.tools.rv_histogram , distX0 = SBCK.tools.rv_histogram ) ## = QM(), default
-    qm_empiric.fit(Y,X)
-    Z_empiric = qm_empiric.predict(X) ## Z is the correction in a non parametric way
-
-    ## But we can know that X and Y follow a Normal distribution, without knowing the parameters:
-    qm_normal = QM( distY0 = scipy.stats.norm , distX0 = scipy.stats.norm )
-    qm_normal.fit(Y,X)
-    Z_normal = qm_normal.predict(X)
-
-    ## And finally, we can know the law of Y, and it is usefull to freeze the distribution:
-    qm_freeze = QM( distY0 = scipy.stats.norm( loc = 5 , scale = 0.5 ) , distX0 = scipy.stats.norm )
-    qm_freeze.fit(Y,X) ## = qm_freeze.fit(None,X) because Y is not used
-    Z_freeze = qm_freeze.predict(X)
-    ```
-
-    References
+    Attributes
     ----------
-    [1] Panofsky, H. A. and Brier, G. W.: Some applications of statistics to meteorology, Mineral Industries Extension Services, College of Mineral Industries, Pennsylvania State University, 103 pp., 1958.
-    [2] Wood, A. W., Leung, L. R., Sridhar, V., and Lettenmaier, D. P.: Hydrologic Implications of Dynamical and Statistical Approaches to Downscaling Climate Model Outputs, Clim. Change, 62, 189–216, https://doi.org/10.1023/B:CLIM.0000013685.99609.9e, 2004.
-    [3] Déqué, M.: Frequency of precipitation and temperature extremes over France in an anthropogenic scenario: Model results and statistical correction according to observed values, Global Planet. Change, 57, 16–26, https://doi.org/10.1016/j.gloplacha.2006.11.030, 2007.
+    n_features : int or None
+        Number of features, set during fit().
+    _sorted_X : list of numpy.ndarray
+        Sorted biased-dataset samples, one array per feature.
+    _sorted_Y : list of numpy.ndarray
+        Sorted reference-dataset samples, one array per feature.
     """
 
-    def __init__(self, **kwargs):  ##{{{
+    def __init__(self):
+        self.n_features = None
+        self._sorted_X = []
+        self._sorted_Y = []
+
+    @staticmethod
+    def _empirical_quantiles(sorted_values):
         """
-        Initialisation of Quantile Mapping bias corrector. All arguments must be named.
+        Build the probability grid associated with a sorted sample.
 
         Parameters
         ----------
-        distY0 : A statistical distribution from scipy.stats or SBCK.tools.rv_*
-            The distribution of references.
-        distX0 : A statistical distribution from scipy.stats or SBCK.tools.rv_*
-            The distribution of biased dataset.
-        kwargsY0 : dict
-            Arguments passed to distY0
-        kwargsX0 : dict
-            Arguments passed to distX0
-        n_features: None or integer
-            Numbers of features, optional because it is determined during fit if X0 and Y0 are not None.
-        tol : float
-            Numerical tolerance, default 1e-3
-        """
-        self.n_features = kwargs.get("n_features")
-        self._tol = kwargs.get("tol") if kwargs.get("tol") is not None else 1e-3
-
-        self._distY0 = _Dist(dist=kwargs.get("distY0"), kwargs=kwargs.get("kwargsY0"))
-        self._distX0 = _Dist(dist=kwargs.get("distX0"), kwargs=kwargs.get("kwargsX0"))
-
-    ##}}}
-
-    def fit(self, Y0, X0):  ##{{{
-        """
-        Fit the QM model
-
-        Parameters
-        ----------
-        Y0  : np.array[ shape = (n_samples,n_features) ]
-            Reference dataset
-        X0  : np.array[ shape = (n_samples,n_features) ]
-            Biased dataset
-        """
-        ## Reshape data in form [n_samples,n_features]
-        if Y0 is not None and Y0.ndim == 1:
-            Y0 = Y0.reshape(-1, 1)
-        if X0 is not None and X0.ndim == 1:
-            X0 = X0.reshape(-1, 1)
-        if self.n_features is None:
-            if Y0 is None and X0 is None:
-                print("n_features must be set during initialization if Y0 = X0 = None")
-            elif Y0 is not None:
-                self.n_features = Y0.shape[1]
-            else:
-                self.n_features = X0.shape[1]
-
-        ##
-        self._distY0.set_features(self.n_features)
-        self._distX0.set_features(self.n_features)
-
-        ## Fit
-        for i in range(self.n_features):
-            if Y0 is not None:
-                self._distY0.fit(Y0[:, i], i)
-            else:
-                self._distY0.fit(None, i)
-            if X0 is not None:
-                self._distX0.fit(X0[:, i], i)
-            else:
-                self._distX0.fit(None, i)
-
-    ##}}}
-
-    def predict(self, X0):  ##{{{
-        """
-        Perform the bias correction
-
-        Parameters
-        ----------
-        X0  : np.array[ shape = (n_samples,n_features) ]
-            Array of values to be corrected
+        sorted_values : numpy.ndarray
+            1D array of sample values, already sorted ascending.
 
         Returns
         -------
-        Z0 : np.array[ shape = (n_samples,n_features) ]
-            Return an array of correction
+        numpy.ndarray
+            Cumulative probabilities in (0, 1], one per sample, using the
+            plotting-position convention p_k = k / n (k = 1..n).
         """
+        # Number of observations in the empirical distribution
+        n = sorted_values.shape[0]
+        # Example for n = 5:
+        #
+        #     [1/5, 2/5, 3/5, 4/5, 5/5]
+        #
+        # which gives:
+        #
+        #     [0.2, 0.4, 0.6, 0.8, 1.0]
+        return np.arange(1, n + 1) / n
+
+    def fit(self, Y0, X0):
+        """
+        Fit the empirical distributions of the reference and biased data.
+
+        Parameters
+        ----------
+        Y0 : numpy.ndarray, shape (n_samples, n_features)
+            Reference dataset (e.g. ERA5).
+        X0 : numpy.ndarray, shape (n_samples, n_features)
+            Biased dataset (e.g. historical model data).
+        """
+        if Y0.ndim == 1:
+            Y0 = Y0.reshape(-1, 1)
         if X0.ndim == 1:
             X0 = X0.reshape(-1, 1)
-        Z0 = np.zeros_like(X0)
+
+        # Quantile Mapping is performed feature by feature.
+        # Therefore, the reference and biased datasets must contain
+        # exactly the same number of features.
+        if Y0.shape[1] != X0.shape[1]:
+            raise ValueError(
+                "Y0 and X0 must have the same number of features: "
+                f"{Y0.shape[1]} != {X0.shape[1]}"
+            )
+
+        self.n_features = X0.shape[1]
+        # Sort the biased values independently for each feature.
+        # Sorting gives a simple empirical representation of the
+        # biased distribution F_X.
+        self._sorted_X = [np.sort(X0[:, i]) for i in range(self.n_features)]
+
+        # Sort the reference values independently for each feature.
+        # These values will be used as the empirical inverse CDF
+        # (quantile function) F_Y^{-1}.
+        self._sorted_Y = [np.sort(Y0[:, i]) for i in range(self.n_features)]
+
+    def predict(self, X0):
+        """
+        Apply the fitted quantile mapping to new biased data.
+
+        For each feature, a value x is mapped to its empirical
+        non-exceedance probability p under the fitted biased distribution,
+        then p is mapped back to a value under the fitted reference
+        distribution (linear interpolation, clipped to the reference
+        sample's range).
+
+        Parameters
+        ----------
+        X0 : numpy.ndarray, shape (n_samples, n_features)
+            Data to correct.
+
+        Returns
+        -------
+        numpy.ndarray, shape (n_samples, n_features)
+            Corrected data.
+        """
+        if self.n_features is None:
+            raise RuntimeError("QM.fit() must be called before predict().")
+
+        # Convert a one-dimensional time series into
+        # a two-dimensional array with one feature
+        if X0.ndim == 1:
+            X0 = X0.reshape(-1, 1)
+
+        if X0.shape[1] != self.n_features:
+            raise ValueError(f"Expected {self.n_features} features, got {X0.shape[1]}.")
+
+        Z0 = np.zeros_like(X0, dtype=np.float64)
+
+        # Quantile Mapping is performed independently for every feature
         for i in range(self.n_features):
-            cdf = self._distX0.law[i].cdf(X0[:, i])
-            cdf[np.logical_not(cdf < 1)] = 1 - self._tol
-            cdf[np.logical_not(cdf > 0)] = self._tol
-            Z0[:, i] = self._distY0.law[i].ppf(cdf)
+            # Empirical samples fitted for the current feature
+            sorted_x = self._sorted_X[i]
+            sorted_y = self._sorted_Y[i]
+
+            # p_x describes the probability axis of the biased distribution,
+            # p_y describes the probability axis of the reference distribution.
+            p_x = self._empirical_quantiles(sorted_x)
+            p_y = self._empirical_quantiles(sorted_y)
+
+            # Step 1: map biased values to their empirical probabilities
+            # p = F_X(x)
+            # np.interp() approximates the empirical CDF by linear
+            # interpolation between the fitted biased sample values.
+            probabilities = np.interp(
+                X0[:, i],
+                sorted_x,
+                p_x,
+                left=p_x[0],
+                right=p_x[-1],
+            )
+
+            # Step 2: map probabilities to the reference distribution
+            # z = F_Y^{-1}(p)
+            Z0[:, i] = np.interp(
+                probabilities,
+                p_y,
+                sorted_y,
+                left=sorted_y[0],
+                right=sorted_y[-1],
+            )
 
         return Z0
-
-    ##}}}

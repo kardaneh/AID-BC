@@ -11,7 +11,6 @@ import sys
 import unittest
 
 import numpy as np
-import scipy.stats as sc
 
 sys.path.insert(
     0,
@@ -19,143 +18,9 @@ sys.path.insert(
 )
 
 from AID_BC.logger import Logger
-from AID_BC.quantile_mapping import MonotoneInverse, QM, rv_histogram
+from AID_BC.quantile_mapping import QM
 
 # python -m unittest tests.test_quantile_mapping
-
-
-# ============================================================================
-# Unit Tests for MonotoneInverse
-# ============================================================================
-
-
-class TestMonotoneInverse(unittest.TestCase):
-    """Unit tests for MonotoneInverse."""
-
-    def setUp(self):
-        """Create a test logger."""
-        self.logger = Logger(
-            console_output=True,
-            file_output=False,
-            pretty_print=True,
-            record=False,
-        )
-
-    def test_linear_inverse(self):
-        """
-        Test a monotone inverse using a linear function with a known inverse.
-
-        For
-
-        y = 2x + 3,
-
-        the inverse is
-
-        x = (y - 3) / 2.
-        """
-        self.logger.info("Testing MonotoneInverse with a linear function")
-
-        def transform(x):
-            return 2.0 * x + 3.0
-
-        inverse = MonotoneInverse(
-            xminmax=(0.0, 10.0),
-            yminmax=(3.0, 23.0),
-            transform=transform,
-        )
-
-        y = np.array([3.0, 7.0, 13.0, 23.0])
-
-        expected = np.array(
-            [
-                (3.0 - 3.0) / 2.0,
-                (7.0 - 3.0) / 2.0,
-                (13.0 - 3.0) / 2.0,
-                (23.0 - 3.0) / 2.0,
-            ]
-        )
-
-        np.testing.assert_allclose(
-            inverse(y),
-            expected,
-            rtol=1e-10,
-            atol=1e-10,
-        )
-
-        self.logger.info("✅ MonotoneInverse linear-function test passed")
-
-
-# ============================================================================
-# Unit Tests for rv_histogram
-# ============================================================================
-
-
-class TestRvHistogram(unittest.TestCase):
-    """Unit tests for the empirical distribution."""
-
-    def setUp(self):
-        """
-        Fit an empirical distribution to ten ordered observations.
-
-        The implementation computes:
-
-        samples = [0, 10, 20, ..., 90]
-        ranks   = [1, 2, 3, ..., 10]
-        p       = [0, 0.2, 0.3, ..., 1]
-        q       = [0, 10, 20, ..., 90]
-
-        The first probability is replaced by zero by rv_histogram.
-        """
-        self.logger = Logger(
-            console_output=True,
-            file_output=False,
-            pretty_print=True,
-            record=False,
-        )
-
-        self.samples = np.arange(
-            0.0,
-            100.0,
-            10.0,
-        )
-
-        self.distribution = rv_histogram(X=self.samples)
-
-    def test_cdf_quantiles(self):
-        """Test empirical CDF values obtained from the sample ranks."""
-        self.logger.info("Testing empirical CDF quantiles")
-
-        values = np.array([0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 90.0])
-
-        # Interpolation points begin with:
-        # (0, 0), (10, 0.2), (20, 0.3), (30, 0.4), ...
-        expected_probabilities = np.array([0.0, 0.1, 0.2, 0.25, 0.3, 0.35, 1.0])
-
-        np.testing.assert_allclose(
-            self.distribution.cdf(values),
-            expected_probabilities,
-            rtol=1e-12,
-            atol=1e-12,
-        )
-
-        self.logger.info("✅ Empirical CDF quantiles test passed")
-
-    def test_inverse_quantiles(self):
-        """Test empirical inverse CDF values obtained by interpolation."""
-        self.logger.info("Testing empirical inverse CDF quantiles")
-
-        probabilities = np.array([0.0, 0.1, 0.2, 0.25, 0.3, 0.35, 1.0])
-
-        expected_quantiles = np.array([0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 90.0])
-
-        np.testing.assert_allclose(
-            self.distribution.ppf(probabilities),
-            expected_quantiles,
-            rtol=1e-12,
-            atol=1e-12,
-        )
-
-        self.logger.info("✅ Empirical inverse CDF quantiles test passed")
 
 
 # ============================================================================
@@ -164,7 +29,7 @@ class TestRvHistogram(unittest.TestCase):
 
 
 class TestQuantileMapping(unittest.TestCase):
-    """Unit tests for empirical and parametric quantile mapping."""
+    """Unit tests for empirical Quantile Mapping."""
 
     def setUp(self):
         """Create a test logger."""
@@ -175,9 +40,34 @@ class TestQuantileMapping(unittest.TestCase):
             record=False,
         )
 
+    def test_empirical_quantiles(self):
+        """
+        Test the empirical probability grid.
+
+        For five sorted observations, the expected probabilities are:
+
+        [1/5, 2/5, 3/5, 4/5, 5/5]
+        """
+        self.logger.info("Testing empirical quantile probabilities")
+
+        values = np.array([10.0, 20.0, 30.0, 40.0, 50.0])
+
+        expected = np.array([0.2, 0.4, 0.6, 0.8, 1.0])
+
+        probabilities = QM._empirical_quantiles(values)
+
+        np.testing.assert_allclose(
+            probabilities,
+            expected,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+
+        self.logger.info("✅ Empirical quantile probabilities test passed")
+
     def test_empirical_mapping(self):
         """
-        Test empirical quantile mapping.
+        Test empirical Quantile Mapping.
 
         Biased sample:
 
@@ -187,11 +77,12 @@ class TestQuantileMapping(unittest.TestCase):
 
         Y = [100, 200, 300, ..., 1000]
 
-        For example:
+        Both distributions use the same empirical probability grid.
+        Therefore:
 
-        - X = 5 has biased CDF probability 0.1.
-        - The reference quantile at probability 0.1 is 150.
-        - Therefore QM(5) = 150.
+        X = 5   -> Y = 150
+        X = 10  -> Y = 200
+        X = 15  -> Y = 250
         """
         self.logger.info("Testing empirical Quantile Mapping")
 
@@ -212,6 +103,7 @@ class TestQuantileMapping(unittest.TestCase):
         expected = np.array([150.0, 200.0, 250.0, 300.0, 350.0])
 
         model = QM()
+
         model.fit(
             Y0=reference,
             X0=biased,
@@ -233,109 +125,69 @@ class TestQuantileMapping(unittest.TestCase):
 
         self.logger.info("✅ Empirical Quantile Mapping test passed")
 
-    def test_normal_mapping(self):
-        """
-        Test normal quantile mapping with frozen distributions.
-
-        The source distribution is N(0, 1) and the reference distribution is
-        N(10, 2). For a source value x, both distributions have the same
-        standardized quantile, so the corrected value is:
-
-        y = 10 + 2x.
-        """
-        self.logger.info("Testing normal-distribution Quantile Mapping")
-
-        model = QM(
-            n_features=1,
-            distX0=sc.norm(
-                loc=0.0,
-                scale=1.0,
-            ),
-            distY0=sc.norm(
-                loc=10.0,
-                scale=2.0,
-            ),
-        )
-
-        model.fit(
-            Y0=None,
-            X0=None,
-        )
-
-        values = np.array([-1.0, 0.0, 1.0])
-        expected = np.array([8.0, 10.0, 12.0])
-
-        corrected = model.predict(values)
-
-        np.testing.assert_allclose(
-            corrected[:, 0],
-            expected,
-            rtol=1e-12,
-            atol=1e-12,
-        )
-
-        self.logger.info("✅ Normal-distribution Quantile Mapping test passed")
-
     def test_two_features(self):
         """
-        Test independent correction of two features.
+        Test independent Quantile Mapping of two features.
 
-        Feature 1 maps N(0, 1) to N(10, 2):
+        Feature 1:
 
-        y1 = 10 + 2x1.
+        X = [0, 10, 20, 30]
+        Y = [100, 200, 300, 400]
 
-        Feature 2 maps N(100, 10) to N(-5, 5):
+        Feature 2:
 
-        y2 = -5 + 0.5 * (x2 - 100).
+        X = [0, 1, 2, 3]
+        Y = [10, 20, 30, 40]
         """
         self.logger.info("Testing two-feature Quantile Mapping")
 
-        model = QM(
-            n_features=2,
-            distX0=[
-                sc.norm(
-                    loc=0.0,
-                    scale=1.0,
-                ),
-                sc.norm(
-                    loc=100.0,
-                    scale=10.0,
-                ),
-            ],
-            distY0=[
-                sc.norm(
-                    loc=10.0,
-                    scale=2.0,
-                ),
-                sc.norm(
-                    loc=-5.0,
-                    scale=5.0,
-                ),
-            ],
+        biased = np.array(
+            [
+                [0.0, 0.0],
+                [10.0, 1.0],
+                [20.0, 2.0],
+                [30.0, 3.0],
+            ]
         )
 
-        model.fit(
-            Y0=None,
-            X0=None,
+        reference = np.array(
+            [
+                [100.0, 10.0],
+                [200.0, 20.0],
+                [300.0, 30.0],
+                [400.0, 40.0],
+            ]
         )
 
         values = np.array(
             [
-                [-1.0, 90.0],
-                [0.0, 100.0],
-                [1.0, 110.0],
+                [5.0, 0.5],
+                [15.0, 1.5],
+                [25.0, 2.5],
             ]
         )
 
         expected = np.array(
             [
-                [8.0, -10.0],
-                [10.0, -5.0],
-                [12.0, 0.0],
+                [150.0, 15.0],
+                [250.0, 25.0],
+                [350.0, 35.0],
             ]
         )
 
+        model = QM()
+
+        model.fit(
+            Y0=reference,
+            X0=biased,
+        )
+
         corrected = model.predict(values)
+
+        self.assertEqual(
+            corrected.shape,
+            expected.shape,
+        )
 
         np.testing.assert_allclose(
             corrected,
@@ -346,15 +198,102 @@ class TestQuantileMapping(unittest.TestCase):
 
         self.logger.info("✅ Two-feature Quantile Mapping test passed")
 
+    def test_values_outside_fitted_range(self):
+        """
+        Test values outside the fitted biased range.
+
+        Values below or above the fitted biased distribution are clipped
+        to the minimum or maximum reference quantile.
+        """
+        self.logger.info("Testing Quantile Mapping outside fitted range")
+
+        biased = np.array([0.0, 10.0, 20.0, 30.0])
+        reference = np.array([100.0, 200.0, 300.0, 400.0])
+
+        values = np.array([-10.0, 40.0])
+
+        expected = np.array([100.0, 400.0])
+
+        model = QM()
+
+        model.fit(
+            Y0=reference,
+            X0=biased,
+        )
+
+        corrected = model.predict(values)
+
+        np.testing.assert_allclose(
+            corrected[:, 0],
+            expected,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+
+        self.logger.info("✅ Quantile Mapping range-clipping test passed")
+
+    def test_predict_before_fit(self):
+        """Test that predict() cannot be called before fit()."""
+        self.logger.info("Testing predict() before fit()")
+
+        model = QM()
+
+        with self.assertRaises(RuntimeError):
+            model.predict(np.array([0.0, 1.0, 2.0]))
+
+        self.logger.info("✅ predict() before fit() test passed")
+
+    def test_fit_feature_mismatch(self):
+        """
+        Test that reference and biased datasets must have the same
+        number of features.
+        """
+        self.logger.info("Testing feature mismatch during fit()")
+
+        reference = np.zeros((10, 2))
+        biased = np.zeros((10, 1))
+
+        model = QM()
+
+        with self.assertRaises(ValueError):
+            model.fit(
+                Y0=reference,
+                X0=biased,
+            )
+
+        self.logger.info("✅ fit() feature mismatch test passed")
+
+    def test_predict_feature_mismatch(self):
+        """
+        Test that prediction data must have the same number of features
+        as the fitted data.
+        """
+        self.logger.info("Testing feature mismatch during predict()")
+
+        reference = np.zeros((10, 2))
+        biased = np.zeros((10, 2))
+
+        model = QM()
+
+        model.fit(
+            Y0=reference,
+            X0=biased,
+        )
+
+        values = np.zeros((5, 3))
+
+        with self.assertRaises(ValueError):
+            model.predict(values)
+
+        self.logger.info("✅ predict() feature mismatch test passed")
+
 
 def run_tests():
-    """Run all quantile mapping tests."""
+    """Run all Quantile Mapping tests."""
 
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
 
-    suite.addTests(loader.loadTestsFromTestCase(TestMonotoneInverse))
-    suite.addTests(loader.loadTestsFromTestCase(TestRvHistogram))
     suite.addTests(loader.loadTestsFromTestCase(TestQuantileMapping))
 
     runner = unittest.TextTestRunner(verbosity=2)

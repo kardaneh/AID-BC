@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "AID_BC"
 version = "0.1.0"
-description = "AID_BC: AI Donwscaling Bias Correction"
+description = "AID_BC: AI Downscaling Bias Correction"
 readme = "README.rst"
 requires-python = ">=3.11,<3.14"
 
@@ -52,6 +52,7 @@ dependencies = [
     "jax[cuda12]==0.10.2",
     "torch",
     "torchvision",
+    "cartopy>=0.25.0",
 ]
 
 [project.scripts]
