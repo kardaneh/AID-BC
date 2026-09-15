@@ -199,7 +199,7 @@ Example using precomputed ERA5:
      --split month \
      --train_start 1980 \
      --train_end 2014 \
-     --apply_start 2015 \
+     --apply_start 2021 \
      --apply_end 2021 \
      --variables VAR_2T \
      --era5_on_cmip6_root \
@@ -245,8 +245,8 @@ Example for 2 m temperature and the two 10 m wind components:
        VAR_2T=/net/nfs/ssd1/kkingston/AID-BC/data/CMIP6_OT/data_6hourly_tas_corrected \
        VAR_10U=/net/nfs/ssd1/kkingston/AID-BC/data/CMIP6_OT/data_6hourly_uas_corrected \
        VAR_10V=/net/nfs/ssd1/kkingston/AID-BC/data/CMIP6_OT/data_6hourly_vas_corrected \
-     --ot_epsilon 100 \
-     --ot_num_iterations 100000 \
+     --ot_epsilon 1 \
+     --ot_num_iterations 1000000 \
      --ot_threshold 0.1 \
      --ot_batch_size 16 \
      --ot_dtype float64
