@@ -222,6 +222,7 @@ class TestSummaryMetrics(unittest.TestCase):
         result = summary_metrics(
             data=data,
             name="ERA5",
+            variable_name="VAR_2T",
         )
 
         self.assertEqual(
@@ -261,6 +262,7 @@ class TestSummaryMetrics(unittest.TestCase):
         result = summary_metrics(
             data=data,
             name="CMIP6_raw",
+            variable_name="VAR_2T",
             ref=reference,
         )
 
@@ -280,6 +282,53 @@ class TestSummaryMetrics(unittest.TestCase):
 
         if self.logger:
             self.logger.info("✅ summary_metrics with reference test passed")
+
+    def test_precipitation_conversion(self):
+        """Test precipitation conversion from m to mm."""
+        if self.logger:
+            self.logger.info("Testing precipitation conversion")
+
+        reference = np.array([0.001, 0.002, 0.003])
+        data = np.array([0.002, 0.002, 0.005])
+
+        result = summary_metrics(
+            data=data,
+            name="CMIP6_raw",
+            variable_name="tp",
+            ref=reference,
+        )
+
+        data_mm = data * 1000.0
+        reference_mm = reference * 1000.0
+        error_mm = data_mm - reference_mm
+
+        self.assertAlmostEqual(
+            result["MEAN"],
+            np.mean(data_mm),
+        )
+        self.assertAlmostEqual(
+            result["STD"],
+            np.std(data_mm),
+        )
+        self.assertAlmostEqual(
+            result["MIN"],
+            np.min(data_mm),
+        )
+        self.assertAlmostEqual(
+            result["MAX"],
+            np.max(data_mm),
+        )
+        self.assertAlmostEqual(
+            result["MAE"],
+            np.mean(np.abs(error_mm)),
+        )
+        self.assertAlmostEqual(
+            result["RMSE"],
+            np.sqrt(np.mean(error_mm**2)),
+        )
+
+        if self.logger:
+            self.logger.info("✅ Precipitation conversion test passed")
 
 
 class TestEvaluate(unittest.TestCase):

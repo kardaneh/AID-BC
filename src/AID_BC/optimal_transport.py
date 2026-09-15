@@ -1,19 +1,82 @@
-# Copyright 2026 The swirl_dynamics Authors.
-
-# Modifications Copyright 2026 IPSL / CNRS / Sorbonne University
-# Modifications by Kishanthan Kingston.
+# Copyright 2026 IPSL / CNRS / Sorbonne University
+# Authors: Kishanthan Kingston
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+# ============================================================================
+# ORIGINAL WORK (SWIRL DYNAMICS / GOOGLE)
+# ============================================================================
+# This work is a derivative of the Sinkhorn optimal transport implementation
+# from the swirl_dynamics project developed by the swirl_dynamics Authors.
 #
+# Original work: Copyright 2026 The swirl_dynamics Authors.
+# Original license: Apache License, Version 2.0.
+# Original source: https://github.com/google-research/swirl-dynamics/blob/main/swirl_dynamics/projects/debiasing/optimal_transport/sinkhorn.py
+#
+# ============================================================================
+# MODIFICATIONS AND ADDITIONS (IPSL / CNRS / Sorbonne University)
+# ============================================================================
+# Modifications include:
+#
+#   1. Optimized squared Euclidean cost computation
+#      - Replaced the broadcasted pairwise difference computation with
+#        ||x-y||^2 = ||x||^2 + ||y||^2 - 2*x.y
+#      - Avoided materializing an intermediate
+#        (n_source, n_target, n_features) array
+#      - Reduced peak memory usage for pairwise cost computation
+#      - Specialized the solver to squared Euclidean transport cost
+#
+#   2. Optimized Sinkhorn iteration
+#      - Precomputed -cost_matrix / epsilon before the Sinkhorn loop
+#      - Precomputed logarithms of the source and target marginal densities
+#      - Reused iteration-invariant quantities throughout the fixed-point loop
+#
+#   3. Simplified convergence-state handling
+#      - Simplified the while_loop state to (iteration, u, v, error)
+#      - Carried the convergence error explicitly in the loop state
+#      - Initialized the convergence error to +inf to guarantee at least one
+#        Sinkhorn iteration
+#
+#   4. Improved convergence reporting
+#      - Replaced the iteration-count-based convergence flag with an explicit
+#        comparison between the final convergence error and the configured
+#        threshold
+#
+#   5. Added input and parameter validation
+#      - Added validation for epsilon, num_iterations, threshold, and
+#        eps_marginal
+#      - Added validation for input dimensionality, feature compatibility,
+#        and empty point clouds
+#      - Moved public input validation outside the jitted solver
+#
+#   6. Improved documentation and code clarity
+#      - Converted documentation to NumPy-style docstrings
+#      - Updated parameter and return-value descriptions
+#      - Improved comments and variable naming for clarity
+#      - Removed the generic metric parameter after specializing the solver
+#        to squared Euclidean cost
+#
+# ============================================================================
+# LICENSE
+# ============================================================================
+# The original swirl_dynamics code is licensed under the Apache License,
+# Version 2.0, and remains subject to the terms and conditions of that license.
+#
+# The modifications and additions made by IPSL / CNRS / Sorbonne University
+# are licensed under the Creative Commons Attribution-NonCommercial-ShareAlike
+# 4.0 International License, to the extent permitted by the Apache License,
+# Version 2.0.
+#
+# Apache License, Version 2.0:
 #     http://www.apache.org/licenses/LICENSE-2.0
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Creative Commons Attribution-NonCommercial-ShareAlike 4.0:
+#     http://creativecommons.org/licenses/by-nc-sa/4.0/
+#
+# ============================================================================
+# ACKNOWLEDGMENTS
+# ============================================================================
+# We thank the swirl_dynamics Authors for developing and releasing the original
+# Sinkhorn optimal transport implementation under an open-source license that
+# enables further research and development.
 
 """
 Sinkhorn algorithm for optimal transport.
@@ -34,27 +97,21 @@ import jax.numpy as jnp
 
 
 Array = jax.Array
-State = tuple[Array, Array, Array, Array]
 
 # We need to enable x64 to avoid numerical issues.
-# Do not force x64 here.
-# The dtype is selected by OptimalTransportCorrector.
 jax.config.update("jax_enable_x64", True)
 
 
-# TODO: Enable dataclasses for SinkhornOutput.
-# @jax.tree_util.register_dataclass
-# @dataclasses.dataclass(kw_only=True)
 class SinkhornOutput(NamedTuple):
     """
     Output of the Sinkhorn optimal transport solver.
 
     Attributes
     ----------
-    potentials : tuple of jax.Array
+    potentials : tuple[jax.Array, jax.Array]
         Dual potentials associated with the source and target distributions.
     cost_matrix : jax.Array
-        Pairwise transport cost matrix.
+        Pairwise squared-Euclidean cost matrix.
     epsilon : float
         Entropic regularization parameter.
     reg_ot_cost : jax.Array or None
@@ -62,7 +119,7 @@ class SinkhornOutput(NamedTuple):
     threshold : float or None
         Convergence threshold used by the Sinkhorn solver.
     converged : bool or None
-        Whether the solver converged according to the configured threshold.
+        Whether the final change in the dual potentials is below threshold.
     num_iterations : int or None
         Number of Sinkhorn iterations performed.
     """
@@ -74,22 +131,20 @@ class SinkhornOutput(NamedTuple):
     threshold: float | None = None
     converged: bool | None = None
     num_iterations: int | None = None
-    # TODO: Compute deviation from optimality in the solutions.
-    # errors: jnp.ndarray | None = None
 
     @property
     def fu(self) -> Array:
-        """The first dual potential."""
+        """Return the source dual potential."""
         return self.potentials[0]
 
     @property
     def gv(self) -> Array:
-        """The second dual potential."""
+        """Return the target dual potential."""
         return self.potentials[1]
 
     @property
     def cost(self) -> Array:
-        """The cost matrix."""
+        """Return the pairwise cost matrix."""
         return self.cost_matrix
 
     @property
@@ -119,39 +174,22 @@ class SinkhornSolver:
     """
     Entropy-regularized optimal transport solver using Sinkhorn iterations.
 
-    The algorithm is implemented in log space using log-sum-exp operations
-    for improved numerical stability.
+    The solver operates in log space and uses "logsumexp" for numerical
+    stability. The pairwise cost is the squared Euclidean distance.
 
     Parameters
     ----------
     epsilon : float
-        Entropic regularization parameter.
+        Entropic regularization parameter. Must be strictly positive.
     sharding : jax.sharding.Sharding or None, optional
         Optional JAX sharding specification for the cost matrix.
     num_iterations : int, default=100
         Maximum number of Sinkhorn iterations.
     threshold : float, default=1e-3
         Convergence threshold based on changes in the dual potentials.
-    metric : callable, optional
-        Element-wise cost function. The default is the squared difference.
     eps_marginal : float, default=1e-12
         Small positive value added to marginal densities before taking
         logarithms.
-
-    Attributes
-    ----------
-    epsilon : float
-        Entropic regularization parameter.
-    num_iterations : int
-        Maximum number of Sinkhorn iterations.
-    metric : callable
-        Element-wise cost function.
-    sharding : jax.sharding.Sharding or None
-        Optional sharding specification.
-    threshold : float
-        Convergence threshold.
-    eps_marginal : float
-        Numerical stabilization constant for marginal densities.
     """
 
     def __init__(
@@ -160,12 +198,29 @@ class SinkhornSolver:
         sharding: jax.sharding.Sharding | None = None,
         num_iterations: int = 100,
         threshold: float = 1e-3,
-        metric: Callable[[Array], Array] = lambda x: jnp.pow(x, 2),  # x²
         eps_marginal: float = 1e-12,
     ):
+        if epsilon <= 0:
+            raise ValueError(
+                f"epsilon must be strictly positive, got epsilon={epsilon}."
+            )
+        if num_iterations <= 0:
+            raise ValueError(
+                "num_iterations must be strictly positive, got "
+                f"num_iterations={num_iterations}."
+            )
+        if threshold < 0:
+            raise ValueError(
+                f"threshold must be non-negative, got threshold={threshold}."
+            )
+        if eps_marginal < 0:
+            raise ValueError(
+                "eps_marginal must be non-negative, got "
+                f"eps_marginal={eps_marginal}."
+            )
+
         self.epsilon = epsilon
         self.num_iterations = num_iterations
-        self.metric = metric
         self.sharding = sharding
         self.threshold = threshold
         self.eps_marginal = eps_marginal
@@ -187,8 +242,50 @@ class SinkhornSolver:
         SinkhornOutput
             Sinkhorn solution containing dual potentials, cost matrix,
             regularized transport cost, convergence state, and iteration count.
+
+        Raises
+        ------
+        ValueError
+            If the inputs are not two-dimensional, have incompatible feature
+            dimensions, or contain no samples.
         """
+        self._validate_inputs(x, y)
         return self._solver(x, y)
+
+    @staticmethod
+    def _validate_inputs(x: Array, y: Array) -> None:
+        """
+        Validate source and target point clouds.
+
+        Parameters
+        ----------
+        x : jax.Array
+            Source samples.
+        y : jax.Array
+            Target samples.
+
+        Raises
+        ------
+        ValueError
+            If the arrays are not two-dimensional, their feature dimensions do
+            not match, or either point cloud is empty.
+        """
+        if x.ndim != 2 or y.ndim != 2:
+            raise ValueError(
+                "x and y must be 2D arrays with shape "
+                "(n_samples, n_features); got "
+                f"x.ndim={x.ndim} and y.ndim={y.ndim}."
+            )
+        if x.shape[1] != y.shape[1]:
+            raise ValueError(
+                "x and y must have the same feature dimension; got "
+                f"x.shape={x.shape} and y.shape={y.shape}."
+            )
+        if x.shape[0] == 0 or y.shape[0] == 0:
+            raise ValueError(
+                "x and y must each contain at least one sample; got "
+                f"x.shape={x.shape} and y.shape={y.shape}."
+            )
 
     def _forward_solve(self, x: Array, y: Array) -> SinkhornOutput:
         """
@@ -206,119 +303,86 @@ class SinkhornSolver:
         SinkhornOutput
             Solver output containing the dual potentials, cost matrix,
             convergence information, and regularized transport cost.
-
-        Raises
-        ------
-        ValueError
-            If x or y is not two-dimensional.
         """
-        # We assume that x and y are 2d arrays. First dimension is the number of
-        # points, and second dimension is the feature dimension.
-        if x.ndim != 2 or y.ndim != 2:
-            raise ValueError(
-                "x and y should be 2d arrays, instead their dimensions are"
-                f" {x.ndim}, {y.ndim} respectively."
-            )
-
         num_x = x.shape[0]
         num_y = y.shape[0]
 
-        # Defines the marginal densities as empirical measures.
+        # Defines the marginal densities as empirical measures
         a, b = jnp.ones((num_x,)) / num_x, jnp.ones((num_y,)) / num_y
 
-        # Initialises approximation vectors in log domain.
+        # Dual potentials in log-domain form
         u, v = jnp.zeros_like(a), jnp.zeros_like(b)
 
-        # Computes cost matrix.
+        # Pairwise squared-Euclidean cost matrix
         cost_matrix = self._compute_cost(x, y)
-        # Adds sharding constraints, if sharding is provided.
+        # Adds sharding constraints, if sharding is provided
         if self.sharding is not None:
             cost_matrix = jax.lax.with_sharding_constraint(cost_matrix, self.sharding)
 
-        jax.debug.print(
-            "[OT] cost min={} mean={} max={}",
-            jnp.min(cost_matrix),
-            jnp.mean(cost_matrix),
-            jnp.max(cost_matrix),
-        )
+        # These quantities are invariant across Sinkhorn iterations. Hoisting
+        # them out of the loop avoids repeated matrix-scale divisions and logs.
+        neg_cost_scaled = -cost_matrix / self.epsilon
+        neg_cost_scaled_t = neg_cost_scaled.T
+        log_a = jnp.log(a + self.eps_marginal)
+        log_b = jnp.log(b + self.eps_marginal)
 
         # Defines the body function for the while loop.
-        def body_fun(val: tuple[int, State]) -> tuple[int, State]:
-            # Unpacks the state, and iteration count.
-            i, (_, _, u, v) = val
-            # Saves the initial values of the potentials.
-            u0, v0 = u, v
+        def body_fun(
+            val: tuple[int, Array, Array, Array],
+        ) -> tuple[int, Array, Array, Array]:
+            """Perform one Sinkhorn fixed-point iteration."""
+            i, u, v, _ = val
+            u_previous = u
+            v_previous = v
 
-            # Updates the u potential following: u^{l+1} = a / (K v^l) in log space.
-            kernel_matrix = self._log_gibbs_kernel(u, v, cost_matrix)
-            u_ = jnp.log(a + self.eps_marginal) - jax.scipy.special.logsumexp(
-                kernel_matrix, axis=1
+            # u^{l+1} update in log space.
+            kernel_matrix = (
+                neg_cost_scaled + u[:, None] / self.epsilon + v[None, :] / self.epsilon
             )
-            u = self.epsilon * u_ + u
+            u_update = log_a - jax.scipy.special.logsumexp(kernel_matrix, axis=1)
+            u = self.epsilon * u_update + u
 
-            # Updates the v potential following: v^{l+1} = b / (K^T u^(l+1)) in log
-            # space.
-            kernel_matrix_t = self._log_gibbs_kernel(u, v, cost_matrix).T
-            v_ = jnp.log(b + self.eps_marginal) - jax.scipy.special.logsumexp(
-                kernel_matrix_t, axis=1
+            # v^{l+1} update in log space. The transposed precomputed cost avoids
+            # transposing a newly constructed full kernel matrix each iteration.
+            kernel_matrix_t = (
+                neg_cost_scaled_t
+                + v[:, None] / self.epsilon
+                + u[None, :] / self.epsilon
             )
-            v = self.epsilon * v_ + v
+            v_update = log_b - jax.scipy.special.logsumexp(kernel_matrix_t, axis=1)
+            v = self.epsilon * v_update + v
 
-            error = jnp.linalg.norm(u0 - u) + jnp.linalg.norm(v0 - v)
-
-            def print_progress(_):
-                jax.debug.print(
-                    "[OT] iteration={}/{} error={}",
-                    i + 1,
-                    self.num_iterations,
-                    error,
-                )
-                return 0
-
-            jax.lax.cond(
-                ((i + 1) % 100) == 0,
-                print_progress,
-                lambda _: 0,
-                operand=0,
-            )
-
-            return (i + 1, (u0, v0, u, v))
+            # Compute the stopping error once and carry it in the loop state.
+            error = jnp.linalg.norm(u_previous - u) + jnp.linalg.norm(v_previous - v)
+            return i + 1, u, v, error
 
         # Condition function for stopping the while loop.
-        def cond_fun(val: tuple[int, State]) -> Array:
-            # Unpacks the state, and iteration count.
-            i, (u0, v0, u, v) = val
-
+        def cond_fun(val: tuple[int, Array, Array, Array]) -> Array:
+            """Continue until convergence or the iteration limit is reached."""
+            i, _, _, error = val
             return jnp.logical_and(
-                (jnp.linalg.norm(u0 - u) + jnp.linalg.norm(v0 - v)) > self.threshold,
+                error > self.threshold,
                 i < self.num_iterations,
             )
 
-        # Runs the loop of the iteration.
-        num_its, (u_previous, v_previous, u, v) = jax.lax.while_loop(
+        # +inf guarantees that the solver performs at least one iteration.
+        init_error = jnp.asarray(jnp.inf, dtype=u.dtype)
+        num_its, u, v, final_error = jax.lax.while_loop(
             cond_fun=cond_fun,
             body_fun=body_fun,
-            init_val=(0, (jnp.ones_like(u), jnp.ones_like(v), u, v)),
+            init_val=(0, u, v, init_error),
         )
 
-        final_error = jnp.linalg.norm(u_previous - u) + jnp.linalg.norm(v_previous - v)
-
-        jax.debug.print(
-            "[OT] iterations={} final_error={} threshold={}",
-            num_its,
-            final_error,
-            self.threshold,
+        # Transport plan pi = exp((-C + u + v) / epsilon)
+        kernel_matrix = (
+            neg_cost_scaled + u[:, None] / self.epsilon + v[None, :] / self.epsilon
         )
-
-        # Computes transport plan pi = diag(a)*K*diag(b).
-        kernel_matrix = self._log_gibbs_kernel(u, v, cost_matrix)
         pi = jnp.exp(kernel_matrix)
 
-        # Sinkhorn distance.
+        # Regularized Sinkhorn transport cost
         reg_ot_cost = jnp.sum(pi * cost_matrix, axis=(-2, -1))
 
-        # Checks if the iteration converged.
-        # converged = num_its < self.num_iterations - 1
+        # Convergence is determined directly from the final stopping error.
         converged = final_error <= self.threshold
 
         return SinkhornOutput(
@@ -330,32 +394,6 @@ class SinkhornSolver:
             converged=converged,
             threshold=self.threshold,
         )
-
-    # def _compute_cost(self, x: Array, y: Array) -> Array:
-    #  r"""Computes the cost matrix of the Sinkhorn iteration.
-
-    #  Args:
-    #    x: Collection of points of set A.
-    #    y: Collection of point of set B.
-
-    #  Returns:
-    #    A matrix C of size (num_x, num_y) corresponding to the distance between
-    #    each pair of points, namely:
-
-    #    C_{i,j} = distance(x_i, y_j).
-
-    #    Here the metric is defined as the sum over the feature dimension of a
-    #    user-prescribed metric. Basically,
-
-    #    distance(x_i, y_j) = sum_{k=1}^d self.metric(x_{i,k} - y_{j,k}),
-
-    #    where k is the index of the feature dimension.
-    #  """
-    #  x_ = x[:, None, :]
-    #  y_ = y[None, :, :]
-    #  cost_matrix = jnp.sum(self.metric(x_ - y_), axis=-1) # self.metric(x_ - y_) = (x_ - y_)²,
-    #  # metric = lambda x: jnp.pow(x, 2)
-    #  return cost_matrix
 
     def _compute_cost(self, x: Array, y: Array) -> Array:
         """
@@ -393,7 +431,8 @@ class SinkhornSolver:
 
         cost_matrix = x_squared_norm + y_squared_norm - 2.0 * cross_product
 
-        # Numerical rounding can produce very small negative distances.
+        # Round-off may create tiny negative values for theoretically zero
+        # squared distances. Clamp only those numerical artifacts to zero.
         return jnp.maximum(cost_matrix, 0.0)
 
     def _log_gibbs_kernel(self, u: Array, v: Array, cost_matrix: Array) -> Array:
@@ -456,9 +495,9 @@ class SinkhornSolver:
                 weights,
             )
 
-        # Here we assume that the cost is the Euclidean distance. In comparison with
-        # [2] we don't have a 1/2 factor in the definition of the distance, so we
-        # need to divide by 2.
+        # Here we assume that the cost is the Euclidean distance.
+        # In comparison with [2], we do not include the 1/2 factor in the cost,
+        # so the gradient term must be divided by 2.
         return jax.vmap(lambda x: x - 0.5 * jax.grad(f_eps)(x), in_axes=0, out_axes=0)
 
     def _potential_fn(
@@ -497,7 +536,7 @@ class SinkhornSolver:
         Raises
         ------
         ValueError
-            If x and y do not have the same feature dimension.
+            If "x" and "y" do not have the same feature dimension.
         """
         x = jnp.atleast_2d(x)
 
@@ -554,7 +593,7 @@ class SinkhornSolver:
                 f" potential.shape[0] != y.shape[0]: {potential.shape}, {y.shape}"
             )
 
-        if not weights:
+        if weights is None:
             num_y = y.shape[0]
             weights = jnp.ones((num_y,)) / num_y
 
@@ -562,7 +601,7 @@ class SinkhornSolver:
             # The dimension should be (1, num_y)
             cost = jnp.squeeze(self._compute_cost(x, y))
             z = jnp.exp((potential - cost) / self.epsilon) * weights
-            # return jnp.sum(y * z[:, None], axis=-1)/jnp.sum(z)
+            # Sum over target samples (axis=0), leaving the feature dimension
             return jnp.sum(y * z[:, None], axis=0) / jnp.sum(z)
 
         return _transport_direct

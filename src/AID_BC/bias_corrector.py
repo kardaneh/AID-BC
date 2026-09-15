@@ -126,7 +126,14 @@ class BiasCorrector(ABC):
 
     @property
     def diagnostics(self):
-        """Return method diagnostics."""
+        """
+        Return method diagnostics.
+
+        Returns
+        -------
+        dict
+            Method name, fitting state, and number of input features.
+        """
         return {
             "method": self.method_name,
             "is_fitted": self.is_fitted,

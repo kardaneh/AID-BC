@@ -198,13 +198,26 @@ class PlotConfig:
 
 def to_numpy_4d(data):
     """
-    Convert input data to a NumPy array with shape [time, variable, latitude, longitude].
+    Convert input data to a four-dimensional NumPy array.
 
-    Accepted inputs:
-    - torch.Tensor with shape [time, variable, latitude, longitude]
-    - numpy.ndarray with shape [time, variable, latitude, longitude]
-    - xarray.DataArray with shape [time, latitude, longitude]
-    - list of xarray.DataArray, each with shape [time, latitude, longitude]
+    The returned array follows the dimension order
+    "[time, variable, latitude, longitude]".
+
+    Parameters
+    ----------
+    data : torch.Tensor, numpy.ndarray, xarray.DataArray, or list of xarray.DataArray
+        Input data to convert.
+
+    Returns
+    -------
+    numpy.ndarray
+        Four-dimensional array with shape
+        "[time, variable, latitude, longitude]".
+
+    Raises
+    ------
+    ValueError
+        If the converted data does not have four dimensions.
     """
 
     # torch.Tensor -> numpy.ndarray

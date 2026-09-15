@@ -84,7 +84,7 @@ class MetricTracker:
         return np.sqrt(self.getmean())
 
 
-def summary_metrics(data, name, ref=None):
+def summary_metrics(data, name, variable_name, ref=None):
     """
     Compute summary statistics for one dataset.
 
@@ -102,6 +102,12 @@ def summary_metrics(data, name, ref=None):
     dict
         Summary statistics.
     """
+    if variable_name.lower() in ["tp", "var_tp", "precipitation"]:
+        data = data * 1000.0
+
+        if ref is not None:
+            ref = np.asarray(ref) * 1000.0
+
     data_tracker = MetricTracker()
     data_tracker.update(data)
 
@@ -235,15 +241,18 @@ def evaluate(
             summary_metrics(
                 reference_variable,
                 "ERA5",
+                variable_name,
             ),
             summary_metrics(
                 raw_variable,
                 "CMIP6_raw",
+                variable_name,
                 ref=reference_variable,
             ),
             summary_metrics(
                 corrected_variable,
                 f"CMIP6_corr_{method.upper()}",
+                variable_name,
                 ref=reference_variable,
             ),
         ]

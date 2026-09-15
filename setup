@@ -30,18 +30,15 @@ variables=(
     "VAR_2T"
     "VAR_10U"
     "VAR_10V"
+    "VAR_TP"
 )
-
-#"VAR_2T"
-#"VAR_10U"
-#"VAR_10V"
 
 # ======================
 # 2. Optimal Transport setup
 # ======================
 
-ot_epsilon=100 #250
-ot_num_iterations=150000 #50000
+ot_epsilon=1 #250
+ot_num_iterations=1000000 #50000
 ot_threshold=0.1 #0.01
 ot_batch_size=16
 ot_dtype="float64"
@@ -55,31 +52,22 @@ era5_on_cmip6_root=(
     "VAR_2T=/data/kkingston/data/CMIP6/ERA5_on_CMIP6/data_6hourly_t2m"
     "VAR_10U=/data/kkingston/data/CMIP6/ERA5_on_CMIP6/data_6hourly_u10"
     "VAR_10V=/data/kkingston/data/CMIP6/ERA5_on_CMIP6/data_6hourly_v10"
+    "VAR_TP=/data/kkingston/data/CMIP6/ERA5_on_CMIP6/data_6hourly_tp_3hmean"
 )
-
-#"VAR_2T=/data/kkingston/data/CMIP6/ERA5_on_CMIP6/data_6hourly_t2m"
-#"VAR_10U=/data/kkingston/data/CMIP6/ERA5_on_CMIP6/data_6hourly_u10"
-#"VAR_10V=/data/kkingston/data/CMIP6/ERA5_on_CMIP6/data_6hourly_v10"
 
 cmip6_train_root=(
     "VAR_2T=/data/kkingston/data/CMIP6/CMIP6_historical/data_6hourly_tas"
     "VAR_10U=/data/kkingston/data/CMIP6/CMIP6_historical/data_6hourly_uas"
     "VAR_10V=/data/kkingston/data/CMIP6/CMIP6_historical/data_6hourly_vas"
+    "VAR_TP=/data/kkingston/data/CMIP6/CMIP6_historical/data_6hourly_pr"
 )
-
-#"VAR_2T=/data/kkingston/data/CMIP6/CMIP6_historical/data_6hourly_tas"
-#"VAR_10U=/data/kkingston/data/CMIP6/CMIP6_historical/data_6hourly_uas"
-#"VAR_10V=/data/kkingston/data/CMIP6/CMIP6_historical/data_6hourly_vas"
 
 cmip6_apply_root=(
     "VAR_2T=/data/kkingston/data/CMIP6/CMIP6_futur/data_6hourly_tas"
     "VAR_10U=/data/kkingston/data/CMIP6/CMIP6_futur/data_6hourly_uas"
     "VAR_10V=/data/kkingston/data/CMIP6/CMIP6_futur/data_6hourly_vas"
+    "VAR_TP=/data/kkingston/data/CMIP6/CMIP6_futur/data_6hourly_pr"
 )
-
-#"VAR_2T=/data/kkingston/data/CMIP6/CMIP6_futur/data_6hourly_tas"
-#"VAR_10U=/data/kkingston/data/CMIP6/CMIP6_futur/data_6hourly_uas"
-#"VAR_10V=/data/kkingston/data/CMIP6/CMIP6_futur/data_6hourly_vas"
 
 # ======================
 # 4. Job naming
@@ -111,11 +99,8 @@ output_dir=(
     "VAR_2T=$OUTPUT_ROOT/data_6hourly_tas_corrected"
     "VAR_10U=$OUTPUT_ROOT/data_6hourly_uas_corrected"
     "VAR_10V=$OUTPUT_ROOT/data_6hourly_vas_corrected"
+    "VAR_TP=$OUTPUT_ROOT/data_6hourly_pr_corrected"
 )
-
-#"VAR_2T=$OUTPUT_ROOT/data_6hourly_tas_corrected"
-#"VAR_10U=$OUTPUT_ROOT/data_6hourly_uas_corrected"
-#"VAR_10V=$OUTPUT_ROOT/data_6hourly_vas_corrected"
 
 # ======================
 # 6. Slurm paths
@@ -182,8 +167,8 @@ cat >> "$sbatch_script" <<EOF
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:$current_gpus
 #SBATCH --mem=0 #55G, 110G
-#SBATCH --time=05:00:00 #1-00:00:00
-#SBATCH --nodelist=hal5
+#SBATCH --time=10:00:00 #1-00:00:00
+#SBATCH --nodelist=hal13
 #SBATCH --mail-user=kkingston@ipsl.fr
 #SBATCH --mail-type=END,FAIL
 EOF

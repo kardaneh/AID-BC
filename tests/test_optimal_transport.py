@@ -141,17 +141,60 @@ class TestSinkhornSolver(unittest.TestCase):
 
         self.logger.info("✅ Sinkhorn cost-matrix test passed")
 
-    def test_invalid_dimensions(self):
-        """Test rejection of non-two-dimensional input arrays."""
-        self.logger.info("Testing Sinkhorn input-dimension validation")
+    def test_invalid_solver_parameters(self):
+        """Test validation of Sinkhorn solver parameters."""
+        self.logger.info("Testing Sinkhorn solver parameter validation")
 
+        with self.assertRaises(ValueError):
+            SinkhornSolver(epsilon=0.0)
+
+        with self.assertRaises(ValueError):
+            SinkhornSolver(epsilon=-1.0)
+
+        with self.assertRaises(ValueError):
+            SinkhornSolver(epsilon=1.0, num_iterations=0)
+
+        with self.assertRaises(ValueError):
+            SinkhornSolver(epsilon=1.0, threshold=-1.0)
+
+        with self.assertRaises(ValueError):
+            SinkhornSolver(epsilon=1.0, eps_marginal=-1.0)
+
+        self.logger.info("✅ Sinkhorn parameter validation test passed")
+
+    def test_invalid_inputs(self):
+        """Test validation of Sinkhorn input point clouds."""
+        self.logger.info("Testing Sinkhorn input validation")
+
+        # Non-2D input.
         x = jnp.array([0.0, 1.0])
         y = jnp.array([[0.0], [1.0]])
 
         with self.assertRaises(ValueError):
-            self.solver._forward_solve(x, y)
+            self.solver(x, y)
 
-        self.logger.info("✅ Sinkhorn input-dimension validation test passed")
+        # Different feature dimensions.
+        x = jnp.zeros((2, 2))
+        y = jnp.zeros((2, 3))
+
+        with self.assertRaises(ValueError):
+            self.solver(x, y)
+
+        # Empty source point cloud.
+        x = jnp.empty((0, 2))
+        y = jnp.zeros((2, 2))
+
+        with self.assertRaises(ValueError):
+            self.solver(x, y)
+
+        # Empty target point cloud.
+        x = jnp.zeros((2, 2))
+        y = jnp.empty((0, 2))
+
+        with self.assertRaises(ValueError):
+            self.solver(x, y)
+
+        self.logger.info("✅ Sinkhorn input validation test passed")
 
     def test_small_sinkhorn_problem(self):
         """Test the complete Sinkhorn solver on a very small problem."""
@@ -192,6 +235,8 @@ class TestSinkhornSolver(unittest.TestCase):
             int(output.num_iterations),
             self.solver.num_iterations,
         )
+
+        self.assertTrue(bool(output.converged))
 
         self.assertTrue(np.isfinite(np.asarray(output.reg_ot_cost)).all())
 

@@ -94,7 +94,7 @@ For developers working on the codebase:
 
 .. code-block:: bash
 
-   python tests/test_runner.py
+   python -m tests.test_runner
 
 Getting Help
 ------------
