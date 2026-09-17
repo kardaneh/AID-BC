@@ -44,6 +44,7 @@ autodoc_mock_imports = [
     "cycler",
     "seaborn",
     "jax",
+    "cartopy",
 ]
 
 autodoc_default_options = {

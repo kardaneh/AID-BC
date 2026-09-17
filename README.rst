@@ -224,27 +224,31 @@ Example for 2 m temperature and the two 10 m wind components:
    python -m AID_BC.main \
      --method ot \
      --split month \
-     --train_start 2000 \
+     --train_start 1980 \
      --train_end 2014 \
      --apply_start 2021 \
      --apply_end 2021 \
-     --variables VAR_2T VAR_10U VAR_10V \
+     --variables VAR_2T VAR_10U VAR_10V VAR_TP \
      --era5_on_cmip6_root \
        VAR_2T=/data/kkingston/data/CMIP6/ERA5_on_CMIP6/data_6hourly_t2m \
        VAR_10U=/data/kkingston/data/CMIP6/ERA5_on_CMIP6/data_6hourly_u10 \
        VAR_10V=/data/kkingston/data/CMIP6/ERA5_on_CMIP6/data_6hourly_v10 \
+       VAR_TP=/data/kkingston/data/CMIP6/ERA5_on_CMIP6/data_6hourly_tp_3hmean \
      --cmip6_train_root \
        VAR_2T=/data/kkingston/data/CMIP6/CMIP6_historical/data_6hourly_tas \
        VAR_10U=/data/kkingston/data/CMIP6/CMIP6_historical/data_6hourly_uas \
        VAR_10V=/data/kkingston/data/CMIP6/CMIP6_historical/data_6hourly_vas \
+       VAR_TP=/data/kkingston/data/CMIP6/CMIP6_historical/data_6hourly_pr \
      --cmip6_apply_root \
        VAR_2T=/data/kkingston/data/CMIP6/CMIP6_futur/data_6hourly_tas \
        VAR_10U=/data/kkingston/data/CMIP6/CMIP6_futur/data_6hourly_uas \
        VAR_10V=/data/kkingston/data/CMIP6/CMIP6_futur/data_6hourly_vas \
+       VAR_TP=/data/kkingston/data/CMIP6/CMIP6_futur/data_6hourly_pr \
      --output_dir \
        VAR_2T=/net/nfs/ssd1/kkingston/AID-BC/data/CMIP6_OT/data_6hourly_tas_corrected \
        VAR_10U=/net/nfs/ssd1/kkingston/AID-BC/data/CMIP6_OT/data_6hourly_uas_corrected \
        VAR_10V=/net/nfs/ssd1/kkingston/AID-BC/data/CMIP6_OT/data_6hourly_vas_corrected \
+       VAR_TP=/net/nfs/ssd1/kkingston/AID-BC/data/CMIP6_OT/data_6hourly_pr_corrected \
      --ot_epsilon 1 \
      --ot_num_iterations 1000000 \
      --ot_threshold 0.1 \

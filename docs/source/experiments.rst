@@ -13,6 +13,12 @@ baseline. The benchmark is performed for four surface variables:
 * 10-m meridional wind (``VAR_10V``),
 * precipitation (``VAR_TP``).
 
+For precipitation, ``VAR_TP`` represents a 3-hour mean precipitation rate.
+CMIP6 provides a 3-hour mean precipitation flux, while ERA5 hourly
+precipitation accumulations are aggregated over the corresponding 3-hour
+period and converted to the same units (m h\ :sup:`-1`). This ensures a
+consistent precipitation definition between the two datasets.
+
 The diagnostics shown below are computed over the 2021 application period.
 
 Methods

@@ -90,7 +90,8 @@ transport." Advances in neural information processing systems 26 (2013).
 optimal transport maps." arXiv preprint arXiv:2109.12004 (2021).
 """
 
-from typing import Callable, NamedTuple
+from __future__ import annotations
+from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
@@ -133,22 +134,22 @@ class SinkhornOutput(NamedTuple):
     num_iterations: int | None = None
 
     @property
-    def fu(self) -> Array:
+    def fu(self):
         """Return the source dual potential."""
         return self.potentials[0]
 
     @property
-    def gv(self) -> Array:
+    def gv(self):
         """Return the target dual potential."""
         return self.potentials[1]
 
     @property
-    def cost(self) -> Array:
+    def cost(self):
         """Return the pairwise cost matrix."""
         return self.cost_matrix
 
     @property
-    def transport_plan(self) -> Array:
+    def transport_plan(self):
         """
         Compute the transport plan from the dual potentials.
 
@@ -194,11 +195,11 @@ class SinkhornSolver:
 
     def __init__(
         self,
-        epsilon: float,
-        sharding: jax.sharding.Sharding | None = None,
-        num_iterations: int = 100,
-        threshold: float = 1e-3,
-        eps_marginal: float = 1e-12,
+        epsilon,
+        sharding=None,
+        num_iterations=100,
+        threshold=1e-3,
+        eps_marginal=1e-12,
     ):
         if epsilon <= 0:
             raise ValueError(
@@ -226,7 +227,7 @@ class SinkhornSolver:
         self.eps_marginal = eps_marginal
         self._solver = jax.jit(self._forward_solve)
 
-    def __call__(self, x: Array, y: Array) -> SinkhornOutput:
+    def __call__(self, x, y):
         """
         Solve the optimal transport problem between two point clouds.
 
@@ -253,7 +254,7 @@ class SinkhornSolver:
         return self._solver(x, y)
 
     @staticmethod
-    def _validate_inputs(x: Array, y: Array) -> None:
+    def _validate_inputs(x, y):
         """
         Validate source and target point clouds.
 
@@ -287,7 +288,7 @@ class SinkhornSolver:
                 f"x.shape={x.shape} and y.shape={y.shape}."
             )
 
-    def _forward_solve(self, x: Array, y: Array) -> SinkhornOutput:
+    def _forward_solve(self, x, y):
         """
         Compute the entropy-regularized optimal transport solution.
 
@@ -327,10 +328,22 @@ class SinkhornSolver:
         log_b = jnp.log(b + self.eps_marginal)
 
         # Defines the body function for the while loop.
-        def body_fun(
-            val: tuple[int, Array, Array, Array],
-        ) -> tuple[int, Array, Array, Array]:
-            """Perform one Sinkhorn fixed-point iteration."""
+        def body_fun(val):
+            """
+            Perform one Sinkhorn fixed-point iteration.
+
+            Parameters
+            ----------
+            val : tuple
+                Current loop state containing the iteration index, source dual
+                potential, target dual potential, and convergence error.
+
+            Returns
+            -------
+            tuple
+                Updated loop state containing the incremented iteration index,
+                updated source and target dual potentials, and convergence error.
+            """
             i, u, v, _ = val
             u_previous = u
             v_previous = v
@@ -357,8 +370,22 @@ class SinkhornSolver:
             return i + 1, u, v, error
 
         # Condition function for stopping the while loop.
-        def cond_fun(val: tuple[int, Array, Array, Array]) -> Array:
-            """Continue until convergence or the iteration limit is reached."""
+        def cond_fun(val):
+            """
+            Check whether the Sinkhorn iteration should continue.
+
+            Parameters
+            ----------
+            val : tuple
+                Current loop state containing the iteration index, source dual
+                potential, target dual potential, and convergence error.
+
+            Returns
+            -------
+            jax.Array
+                Boolean condition indicating whether the solver should continue
+                iterating.
+            """
             i, _, _, error = val
             return jnp.logical_and(
                 error > self.threshold,
@@ -395,7 +422,7 @@ class SinkhornSolver:
             threshold=self.threshold,
         )
 
-    def _compute_cost(self, x: Array, y: Array) -> Array:
+    def _compute_cost(self, x, y):
         """
         Compute the squared Euclidean distance matrix without creating
         an array of shape (n_x, n_y, n_features).
@@ -435,7 +462,7 @@ class SinkhornSolver:
         # squared distances. Clamp only those numerical artifacts to zero.
         return jnp.maximum(cost_matrix, 0.0)
 
-    def _log_gibbs_kernel(self, u: Array, v: Array, cost_matrix: Array) -> Array:
+    def _log_gibbs_kernel(self, u, v, cost_matrix):
         """
         Computes the kernel K = diag(u) exp(-C/eps) diag(v) in log space.
 
@@ -457,17 +484,13 @@ class SinkhornSolver:
         kernel /= self.epsilon
         return kernel
 
-    def transport_fn(
-        self, potential: Array, y: Array, weights: Array | None = None
-    ) -> Callable[[Array], Array]:
-        r"""
-        Transport functions using the formulation in the proposition 2 of [2].
+    def transport_fn(self, potential, y, weights=None):
+        """
+        Construct the transport function using the formulation in Proposition 2
+        of [2].
 
-        We use the fact that the transport function can be written as:
-
-        T(x) = x - 0.5 * \nabla(f_{\epsilon}(x)),
-
-        where f_{\epsilon}(x) is the potential computed using the Eq. 9 in [2].
+        The transport map is computed from the entropic potential using the
+        gradient-based formulation described in Proposition 2 of [2].
 
         Parameters
         ----------
@@ -486,8 +509,20 @@ class SinkhornSolver:
         """
 
         # Computes the potential of set A.
-        # f_eps = lambda x: self._potential_fn(x, potential, y, weights)
-        def f_eps(x: Array) -> Array:
+        def f_eps(x):
+            """
+            Evaluate the entropic potential at a source sample.
+
+            Parameters
+            ----------
+            x : jax.Array
+                Source sample where the potential is evaluated.
+
+            Returns
+            -------
+            jax.Array
+                Value of the entropic potential at the input sample.
+            """
             return self._potential_fn(
                 x,
                 potential,
@@ -502,19 +537,17 @@ class SinkhornSolver:
 
     def _potential_fn(
         self,
-        x: Array,
-        potential: Array,
-        y: Array,
-        weights: Array | None = None,
-    ) -> Array:
-        r"""Callback function to compute the potential.
+        x,
+        potential,
+        y,
+        weights=None,
+    ):
+        """
+        Compute the entropic potential at the input samples.
 
-        Here we use the formula in Proposition 2 of [2]:
-
-        f_{\epsilon}(x) = - \epsilon \log (\sum_{i}
-              exp ( g_{\epsilon}(y_i) - dist(x, y_i) ) b_i
-
-        here b_i is the marginal density of set B (associated with y_i).
+        The potential is evaluated using the formulation from Proposition 2
+        of [2], combining the target dual potential, pairwise transport cost,
+        and target marginal weights.
 
         Parameters
         ----------
@@ -536,7 +569,7 @@ class SinkhornSolver:
         Raises
         ------
         ValueError
-            If "x" and "y" do not have the same feature dimension.
+            If x and y do not have the same feature dimension.
         """
         x = jnp.atleast_2d(x)
 
@@ -556,9 +589,7 @@ class SinkhornSolver:
         lse = -self.epsilon * jax.scipy.special.logsumexp(z, b=weights, axis=-1)
         return jnp.squeeze(lse)
 
-    def transport_fn_direct(
-        self, potential: Array, y: Array, weights: Array | None
-    ) -> Callable[[Array], Array]:
+    def transport_fn_direct(self, potential, y, weights=None):
         """
         Transport directly (not very stable). Using the formulas in [1].
 
@@ -597,7 +628,20 @@ class SinkhornSolver:
             num_y = y.shape[0]
             weights = jnp.ones((num_y,)) / num_y
 
-        def _transport_direct(x: Array) -> Array:
+        def _transport_direct(x):
+            """
+            Transport a source sample directly using the target potential.
+
+            Parameters
+            ----------
+            x : jax.Array
+                Source sample to transport.
+
+            Returns
+            -------
+            jax.Array
+                Transported sample in the target feature space.
+            """
             # The dimension should be (1, num_y)
             cost = jnp.squeeze(self._compute_cost(x, y))
             z = jnp.exp((potential - cost) / self.epsilon) * weights
