@@ -28,6 +28,14 @@ AID_BC.diagnostics module
    :undoc-members:
    :show-inheritance:
 
+AID_BC.evaluater module
+-----------------------
+
+.. automodule:: AID_BC.evaluater
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 AID_BC.logger module
 --------------------
 
