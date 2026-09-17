@@ -243,7 +243,7 @@ class QuantileMappingCorrector(BiasCorrector):
 
     def __init__(self):
         super().__init__()
-        self.model: QM | None = None
+        self.model = None
 
     def fit(
         self,
@@ -580,7 +580,7 @@ class OptimalTransportCorrector(BiasCorrector):
         biased,
     ):
         """
-        Fit the CMIP6 to ERA5 Optimal Transport map.
+        Fit the Optimal Transport map from CMIP6 to ERA5.
 
         Parameters
         ----------
@@ -728,7 +728,7 @@ class OptimalTransportCorrector(BiasCorrector):
 
         normalized_data = self._normalize(data)
 
-        corrected_batches: list[np.ndarray] = []
+        corrected_batches = []
 
         number_samples = normalized_data.shape[0]
 

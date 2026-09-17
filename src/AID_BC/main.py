@@ -15,7 +15,6 @@ import numpy as np
 import xarray as xr
 
 from AID_BC.bias_corrector import (
-    BiasCorrector,
     create_bias_corrector,
 )
 
@@ -277,7 +276,7 @@ def validate_variable_paths(variable_names, paths, argument_name):
         raise ValueError(f"{argument_name}: unexpected variables {sorted(unexpected)}.")
 
 
-def validate_args(args: argparse.Namespace):
+def validate_args(args):
     """
     Validate general command-line arguments.
 
@@ -1578,7 +1577,7 @@ def fit_bias_correctors_by_month(
     RuntimeError
         If ERA5 or CMIP6 contains no training samples for a calendar month.
     """
-    correctors: dict[int, BiasCorrector] = {}
+    correctors = {}
 
     for month in range(1, 13):
         logger.info(f"=== Fitting corrector for month {month:02d} ===")

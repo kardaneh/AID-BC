@@ -3,8 +3,8 @@ import sys
 from datetime import datetime
 
 # Add project root to Python path for autodoc
-PROJECT_ROOT = os.path.abspath(os.path.join(__file__, "../../.."))
-sys.path.insert(0, PROJECT_ROOT)
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "src"))
 
 # Project information
 project = "AID-BC"
@@ -43,8 +43,8 @@ autodoc_mock_imports = [
     "tqdm",
     "cycler",
     "seaborn",
-    "jax",
     "cartopy",
+    "jax",
 ]
 
 autodoc_default_options = {
