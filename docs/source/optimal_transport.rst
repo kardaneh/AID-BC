@@ -17,11 +17,12 @@ Purpose
 Climate model outputs often contain systematic biases compared with reference
 datasets or reanalysis products.
 
-Optimal Transport corrects these biases by finding a mapping that transports
-the biased CMIP6 distribution onto the ERA5 reference distribution at minimum
-cost. Because this mapping can act on several variables and grid points at once, it
-can account for spatial and inter-variable dependencies that are not explicitly
-represented by a variable-by-variable correction.
+Optimal Transport corrects these biases by estimating an entropy-regularized
+transport plan between the biased CMIP6 distribution and the ERA5 reference
+distribution. A transport map derived from this plan is then used to correct
+new CMIP6 samples. Because this mapping can act on several variables and grid
+points at once, it can account for spatial and inter-variable dependencies
+that are not explicitly represented by a variable-by-variable correction.
 
 General principle
 -----------------
@@ -48,8 +49,9 @@ AID-BC instead solves the entropy-regularized problem:
    \;+\; \varepsilon \sum_{i,j} \pi_{ij} \left( \log \pi_{ij} - 1 \right)
 
 where ``a`` and ``b`` are the empirical marginal weights associated with the
-CMIP6 and ERA5 samples, and :math:`\varepsilon` controls the strength of the
-entropic regularization.
+CMIP6 and ERA5 samples. In the current implementation, all samples within
+each dataset have uniform weights. The parameter :math:`\varepsilon` controls
+the strength of the entropic regularization.
 
 This regularized problem is solved with the Sinkhorn algorithm, which
 alternately updates two dual potentials ``u`` and ``v`` (one per CMIP6 sample,

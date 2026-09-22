@@ -6,6 +6,15 @@
 # To view a copy of this license, visit
 # http://creativecommons.org/licenses/by-nc-sa/4.0/
 
+"""
+Perform empirical Quantile Mapping for bias correction.
+
+The method estimates the empirical distributions of reference and biased
+data independently for each feature. Biased values are corrected by mapping
+their empirical cumulative probabilities to the corresponding quantiles
+of the reference distribution using linear interpolation.
+"""
+
 import numpy as np
 
 

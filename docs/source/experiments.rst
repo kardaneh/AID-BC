@@ -67,6 +67,136 @@ The OT experiment uses the following parameters:
 The four variables are corrected jointly in the OT experiment, whereas the QM
 experiments are performed independently for each variable.
 
+Descriptive statistics
+~~~~~~~~~~~~~~~~~~~~~~
+
+The table below summarizes the mean, standard deviation, minimum and maximum
+values over the 2021 application period. Temperature is expressed in K, wind
+components in m s\ :sup:`-1`, and precipitation in mm h\ :sup:`-1`.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 12 16 12 12 12 12
+
+   * - Variable
+     - Dataset
+     - Mean
+     - Std
+     - Min
+     - Max
+
+   * - ``VAR_2T``
+     - ERA5
+     - 278.83
+     - 21.35
+     - 196.60
+     - 324.24
+   * -
+     - CMIP6
+     - 278.39
+     - 22.20
+     - 178.40
+     - 322.03
+   * -
+     - QM
+     - 279.19
+     - 21.07
+     - 193.87
+     - 322.58
+   * -
+     - OT
+     - 278.62
+     - 21.20
+     - 196.04
+     - 324.76
+
+   * - ``VAR_10U``
+     - ERA5
+     - -0.04
+     - 5.47
+     - -36.44
+     - 27.04
+   * -
+     - CMIP6
+     - -0.14
+     - 5.22
+     - -30.96
+     - 33.25
+   * -
+     - QM
+     - -0.07
+     - 5.39
+     - -34.65
+     - 27.14
+   * -
+     - OT
+     - -0.05
+     - 5.41
+     - -33.93
+     - 27.16
+
+   * - ``VAR_10V``
+     - ERA5
+     - 0.17
+     - 4.59
+     - -27.55
+     - 26.57
+   * -
+     - CMIP6
+     - 0.20
+     - 4.54
+     - -28.16
+     - 30.12
+   * -
+     - QM
+     - 0.19
+     - 4.60
+     - -30.16
+     - 29.47
+   * -
+     - OT
+     - 0.20
+     - 4.60
+     - -26.76
+     - 31.55
+
+   * - ``VAR_TP``
+     - ERA5
+     - 0.10
+     - 0.27
+     - 0.00
+     - 13.17
+   * -
+     - CMIP6
+     - 0.10
+     - 0.37
+     - 0.00
+     - 23.97
+   * -
+     - QM
+     - 0.11
+     - 0.27
+     - 0.00
+     - 14.29
+   * -
+     - OT
+     - 0.09
+     - 0.26
+     - 0.00
+     - 13.65
+
+Overall, both correction methods bring several first-order statistics closer
+to ERA5.
+For temperature, OT closely reproduces the ERA5 mean and range, while both
+methods improve the variability compared with raw CMIP6. For the wind
+components, the differences are relatively small, as CMIP6 is already close
+to ERA5.
+
+The largest change is observed for precipitation. Raw CMIP6 has a substantially
+larger standard deviation and maximum value than ERA5. Both corrections reduce
+this spread, with OT reproducing the ERA5 standard deviation and maximum more
+closely.
+
 Power spectral density
 ~~~~~~~~~~~~~~~~~~~~~~
 

@@ -288,7 +288,7 @@ class TestOptimalTransportCorrector(unittest.TestCase):
 
         self.logger.info("✅ Optimal Transport normalization test passed")
 
-    @patch("AID_BC.bias_corrector.SinkhornSolver")
+    @patch("AID_BC.bias_corrector.OptimalTransport")
     def test_fit(self, mock_solver_class):
         """Test successful OT fitting without running Sinkhorn."""
         self.logger.info("Testing Optimal Transport fitting")
@@ -332,7 +332,7 @@ class TestOptimalTransportCorrector(unittest.TestCase):
             f"cost={corrector.regularized_ot_cost}"
         )
 
-    @patch("AID_BC.bias_corrector.SinkhornSolver")
+    @patch("AID_BC.bias_corrector.OptimalTransport")
     def test_fit_rejects_non_convergence(self, mock_solver_class):
         """Test rejection when Sinkhorn does not converge."""
         self.logger.info("Testing Optimal Transport non-convergence handling")

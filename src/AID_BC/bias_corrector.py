@@ -25,7 +25,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from AID_BC.quantile_mapping import QM
-from AID_BC.optimal_transport import SinkhornSolver
+from AID_BC.optimal_transport import OptimalTransport
 
 
 class BiasCorrector(ABC):
@@ -637,7 +637,7 @@ class OptimalTransportCorrector(BiasCorrector):
             )
         )
 
-        self.solver = SinkhornSolver(
+        self.solver = OptimalTransport(
             epsilon=self.epsilon,
             num_iterations=self.num_iterations,
             threshold=self.threshold,

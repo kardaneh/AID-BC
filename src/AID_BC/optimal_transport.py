@@ -1,137 +1,91 @@
 # Copyright 2026 IPSL / CNRS / Sorbonne University
 # Authors: Kishanthan Kingston
 #
+# This work is licensed under the Creative Commons
+# Attribution-NonCommercial-ShareAlike 4.0 International License.
+# To view a copy of this license, visit
+# http://creativecommons.org/licenses/by-nc-sa/4.0/
+
 # ============================================================================
-# ORIGINAL WORK (SWIRL DYNAMICS / GOOGLE)
+# REFERENCES
 # ============================================================================
-# This work is a derivative of the Sinkhorn optimal transport implementation
-# from the swirl_dynamics project developed by the swirl_dynamics Authors.
+# Mathematical foundations:
 #
-# Original work: Copyright 2026 The swirl_dynamics Authors.
-# Original license: Apache License, Version 2.0.
-# Original source: https://github.com/google-research/swirl-dynamics/blob/main/swirl_dynamics/projects/debiasing/optimal_transport/sinkhorn.py
+# Cuturi, M. (2013). Sinkhorn Distances: Lightspeed Computation of
+# Optimal Transport.
 #
-# ============================================================================
-# MODIFICATIONS AND ADDITIONS (IPSL / CNRS / Sorbonne University)
-# ============================================================================
-# Modifications include:
+# Pooladian, A.-A., and Niles-Weed, J. (2021).
+# Entropic Estimation of Optimal Transport Maps.
 #
-#   1. Optimized squared Euclidean cost computation
-#      - Replaced the broadcasted pairwise difference computation with
-#        ||x-y||^2 = ||x||^2 + ||y||^2 - 2*x.y
-#      - Avoided materializing an intermediate
-#        (n_source, n_target, n_features) array
-#      - Reduced peak memory usage for pairwise cost computation
-#      - Specialized the solver to squared Euclidean transport cost
+# Application to statistical downscaling:
 #
-#   2. Optimized Sinkhorn iteration
-#      - Precomputed -cost_matrix / epsilon before the Sinkhorn loop
-#      - Precomputed logarithms of the source and target marginal densities
-#      - Reused iteration-invariant quantities throughout the fixed-point loop
+# Wan, Z. Y., et al. (2023). Debias Coarsely, Sample Conditionally: Statistical
+# Downscaling through Optimal Transport and Probabilistic Diffusion Models.
 #
-#   3. Simplified convergence-state handling
-#      - Simplified the while_loop state to (iteration, u, v, error)
-#      - Carried the convergence error explicitly in the loop state
-#      - Initialized the convergence error to +inf to guarantee at least one
-#        Sinkhorn iteration
-#
-#   4. Improved convergence reporting
-#      - Replaced the iteration-count-based convergence flag with an explicit
-#        comparison between the final convergence error and the configured
-#        threshold
-#
-#   5. Added input and parameter validation
-#      - Added validation for epsilon, num_iterations, threshold, and
-#        eps_marginal
-#      - Added validation for input dimensionality, feature compatibility,
-#        and empty point clouds
-#      - Moved public input validation outside the jitted solver
-#
-#   6. Improved documentation and code clarity
-#      - Converted documentation to NumPy-style docstrings
-#      - Updated parameter and return-value descriptions
-#      - Improved comments and variable naming for clarity
-#      - Removed the generic metric parameter after specializing the solver
-#        to squared Euclidean cost
-#
-# ============================================================================
-# LICENSE
-# ============================================================================
-# The original swirl_dynamics code is licensed under the Apache License,
-# Version 2.0, and remains subject to the terms and conditions of that license.
-#
-# The modifications and additions made by IPSL / CNRS / Sorbonne University
-# are licensed under the Creative Commons Attribution-NonCommercial-ShareAlike
-# 4.0 International License, to the extent permitted by the Apache License,
-# Version 2.0.
-#
-# Apache License, Version 2.0:
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Creative Commons Attribution-NonCommercial-ShareAlike 4.0:
-#     http://creativecommons.org/licenses/by-nc-sa/4.0/
-#
+# Sinkhorn implementation reference:
+# https://github.com/google-research/swirl-dynamics/blob/main/swirl_dynamics/projects/debiasing/optimal_transport/sinkhorn.py
+
 # ============================================================================
 # ACKNOWLEDGMENTS
 # ============================================================================
-# We thank the swirl_dynamics Authors for developing and releasing the original
-# Sinkhorn optimal transport implementation under an open-source license that
-# enables further research and development.
+# We thank the swirl_dynamics Authors for making their implementation
+# available for further research and development.
 
 """
-Sinkhorn algorithm for optimal transport.
+Solve entropy-regularized optimal transport using the Sinkhorn algorithm.
 
-References:
-
-[1] Cuturi, Marco. "Sinkhorn distances: Lightspeed computation of optimal
-transport." Advances in neural information processing systems 26 (2013).
-
-[2] Pooladian, Aram-Alexandre, and Niles-Weed, Jonathan. "Entropic estimation of
-optimal transport maps." arXiv preprint arXiv:2109.12004 (2021).
+The solver computes a squared-Euclidean cost matrix, estimates dual
+potentials with Sinkhorn iterations, and constructs transport functions
+from the target dual potential.
 """
 
 from __future__ import annotations
+
 from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
-
+from jax.scipy.special import logsumexp
 
 Array = jax.Array
-
-# We need to enable x64 to avoid numerical issues.
 jax.config.update("jax_enable_x64", True)
 
 
-class SinkhornOutput(NamedTuple):
+class TransportSolution(NamedTuple):
     """
-    Output of the Sinkhorn optimal transport solver.
+    Store the output of the entropy-regularized transport solver.
+
+    The source and target dual potentials define the transport plan. The
+    remaining fields describe the transport problem and the solver's outcome.
 
     Attributes
     ----------
-    potentials : tuple[jax.Array, jax.Array]
-        Dual potentials associated with the source and target distributions.
+    potentials : tuple of jax.Array
+        Source and target dual potentials with shapes (n_source,) and
+        (n_target,), respectively.
     cost_matrix : jax.Array
-        Pairwise squared-Euclidean cost matrix.
+        Pairwise squared-Euclidean cost matrix with shape
+        (n_source, n_target).
     epsilon : float
         Entropic regularization parameter.
-    reg_ot_cost : jax.Array or None
-        Regularized optimal transport cost.
-    threshold : float or None
-        Convergence threshold used by the Sinkhorn solver.
-    converged : bool or None
+    reg_ot_cost : jax.Array
+        Transport cost computed as sum(plan * cost_matrix). This retains
+        the previous solver's convention and does not add an entropy term.
+    threshold : float
+        Convergence threshold for changes in the dual potentials.
+    converged : jax.Array
         Whether the final change in the dual potentials is below threshold.
-    num_iterations : int or None
+    num_iterations : jax.Array
         Number of Sinkhorn iterations performed.
     """
 
     potentials: tuple[Array, Array]
     cost_matrix: Array
     epsilon: float
-    reg_ot_cost: Array | None = None
-    threshold: float | None = None
-    converged: bool | None = None
-    num_iterations: int | None = None
+    reg_ot_cost: Array
+    threshold: float
+    converged: Array
+    num_iterations: Array
 
     @property
     def fu(self):
@@ -151,46 +105,185 @@ class SinkhornOutput(NamedTuple):
     @property
     def transport_plan(self):
         """
-        Compute the transport plan from the dual potentials.
+        Compute the transport plan from the fitted dual potentials.
 
         Returns
         -------
         jax.Array
-            Entropic transport plan.
-
-        Raises
-        ------
-        ValueError
-            If epsilon is not strictly positive.
+            Transport plan with shape (n_source, n_target).
         """
-        if self.epsilon <= 0:
-            raise ValueError("Epsilon should be positive.")
-        kernel = -self.cost + self.fu[:, None] + self.gv[None, :]
-        kernel /= self.epsilon
-
-        return jnp.exp(kernel)
+        return jnp.exp(
+            (-self.cost_matrix + self.fu[:, None] + self.gv[None, :]) / self.epsilon
+        )
 
 
-class SinkhornSolver:
+def _squared_euclidean_cost(x: Array, y: Array) -> Array:
     """
-    Entropy-regularized optimal transport solver using Sinkhorn iterations.
+    Compute pairwise squared-Euclidean distances between two point clouds.
 
-    The solver operates in log space and uses "logsumexp" for numerical
-    stability. The pairwise cost is the squared Euclidean distance.
+    The dot-product identity avoids constructing an intermediate array with
+    shape (n_x, n_y, n_features).
+
+    Parameters
+    ----------
+    x : jax.Array, shape (n_x, n_features)
+        Source samples.
+    y : jax.Array, shape (n_y, n_features)
+        Target samples.
+
+    Returns
+    -------
+    jax.Array, shape (n_x, n_y)
+        Pairwise squared-Euclidean distances, clipped below at zero to
+        remove small negative values caused by floating-point round-off.
+    """
+    # Compute the squared Euclidean norm of each source and target sample.
+    x_norm = jnp.sum(jnp.square(x), axis=1, keepdims=True)  # shape (n_x, 1)
+    y_norm = jnp.sum(jnp.square(y), axis=1, keepdims=True).T  # shape (1, n_y)
+    dot_products = x @ y.T  # shape (n_x, n_y)
+    return jnp.maximum(x_norm + y_norm - 2.0 * dot_products, 0.0)
+
+
+def _iterate_potentials(cost, epsilon, threshold, num_iterations, eps_marginal):
+    """
+    Update the source and target dual potentials with Sinkhorn iterations.
+
+    Both empirical distributions are assigned uniform masses. Updates are
+    performed in log space, and the iterations stop when the sum of the
+    Euclidean norms of successive potential changes reaches the threshold.
+
+    Parameters
+    ----------
+    cost : jax.Array, shape (n_source, n_target)
+        Pairwise squared-Euclidean cost matrix.
+    epsilon : float
+        Entropic regularization parameter.
+    threshold : float
+        Convergence threshold for the sum of potential-change norms.
+    num_iterations : int
+        Maximum number of Sinkhorn iterations.
+    eps_marginal : float
+        Small value added to each marginal mass before taking its logarithm.
+
+    Returns
+    -------
+    source_potential : jax.Array, shape (n_source,)
+        Fitted source dual potential.
+    target_potential : jax.Array, shape (n_target,)
+        Fitted target dual potential.
+    state : tuple
+        Number of iterations and final potential-change error.
+    """
+    n_source, n_target = cost.shape
+    # Represent both point clouds as empirical distributions with uniform masses.
+    source_mass = jnp.ones((n_source,)) / n_source
+    target_mass = jnp.ones((n_target,)) / n_target
+    source_potential = jnp.zeros_like(source_mass)
+    target_potential = jnp.zeros_like(target_mass)
+
+    # Precompute terms that do not change during Sinkhorn iterations.
+    scaled_cost = -cost / epsilon
+    scaled_cost_t = scaled_cost.T
+    source_log_mass = jnp.log(source_mass + eps_marginal)
+    target_log_mass = jnp.log(target_mass + eps_marginal)
+
+    def update(state):
+        """
+        Perform one Sinkhorn iteration to update both dual potentials.
+
+        The source potential is updated first using the current target
+        potential. The target potential is then updated using the new source
+        potential. The convergence error measures the changes in both
+        potentials during this iteration.
+
+        Parameters
+        ----------
+        state : tuple
+            Current iteration state containing the iteration count, source
+            dual potential, target dual potential, and convergence error.
+
+        Returns
+        -------
+        tuple
+            Updated iteration state containing the incremented iteration
+            count, updated source and target dual potentials, and the sum
+            of the Euclidean norms of their changes.
+        """
+        iteration, source, target, _ = state
+        previous_source, previous_target = source, target
+
+        # Update the source dual potential using the current target potential.
+        row_log_plan = (
+            scaled_cost + source[:, None] / epsilon + target[None, :] / epsilon
+        )
+        row_correction = source_log_mass - logsumexp(row_log_plan, axis=1)
+        source = epsilon * row_correction + source
+
+        # Update the target dual potential using the new source potential.
+        column_log_plan = (
+            scaled_cost_t + target[:, None] / epsilon + source[None, :] / epsilon
+        )
+        column_correction = target_log_mass - logsumexp(column_log_plan, axis=1)
+        target = epsilon * column_correction + target
+
+        # Measure convergence using changes in both dual potentials.
+        error = jnp.linalg.norm(previous_source - source) + jnp.linalg.norm(
+            previous_target - target
+        )
+        return iteration + 1, source, target, error
+
+    def continue_iterating(state):
+        """
+        Check whether Sinkhorn should perform another iteration.
+
+        Iterations continue while the convergence error exceeds the
+        configured threshold and the maximum iteration count has not
+        been reached.
+
+        Parameters
+        ----------
+        state : tuple
+            Current iteration state containing the iteration count, source
+            dual potential, target dual potential, and convergence error.
+
+        Returns
+        -------
+        jax.Array
+            Boolean indicating whether another Sinkhorn iteration is required.
+        """
+        iteration, _, _, error = state
+        return jnp.logical_and(error > threshold, iteration < num_iterations)
+
+    # An infinite initial error guarantees at least one iteration.
+    initial_error = jnp.asarray(jnp.inf, dtype=source_potential.dtype)
+    count, source_potential, target_potential, final_error = jax.lax.while_loop(
+        continue_iterating,
+        update,
+        (0, source_potential, target_potential, initial_error),
+    )
+    return source_potential, target_potential, (count, final_error)
+
+
+class OptimalTransport:
+    """
+    Solve entropy-regularized optimal transport using Sinkhorn iterations.
+
+    The solver uses the squared-Euclidean cost and uniform empirical
+    marginals. The target dual potential can be used to construct a
+    transport function for new source samples.
 
     Parameters
     ----------
     epsilon : float
         Entropic regularization parameter. Must be strictly positive.
     sharding : jax.sharding.Sharding or None, optional
-        Optional JAX sharding specification for the cost matrix.
+        Optional sharding constraint applied to the cost matrix.
     num_iterations : int, default=100
         Maximum number of Sinkhorn iterations.
     threshold : float, default=1e-3
         Convergence threshold based on changes in the dual potentials.
     eps_marginal : float, default=1e-12
-        Small positive value added to marginal densities before taking
-        logarithms.
+        Small value added to marginal masses before taking their logarithms.
     """
 
     def __init__(
@@ -202,450 +295,316 @@ class SinkhornSolver:
         eps_marginal=1e-12,
     ):
         if epsilon <= 0:
-            raise ValueError(
-                f"epsilon must be strictly positive, got epsilon={epsilon}."
-            )
+            raise ValueError(f"epsilon must be strictly positive, got {epsilon}.")
         if num_iterations <= 0:
-            raise ValueError(
-                "num_iterations must be strictly positive, got "
-                f"num_iterations={num_iterations}."
-            )
+            raise ValueError("num_iterations must be strictly positive.")
         if threshold < 0:
-            raise ValueError(
-                f"threshold must be non-negative, got threshold={threshold}."
-            )
+            raise ValueError("threshold must be non-negative.")
         if eps_marginal < 0:
-            raise ValueError(
-                "eps_marginal must be non-negative, got "
-                f"eps_marginal={eps_marginal}."
-            )
-
+            raise ValueError("eps_marginal must be non-negative.")
         self.epsilon = epsilon
-        self.num_iterations = num_iterations
         self.sharding = sharding
+        self.num_iterations = num_iterations
         self.threshold = threshold
         self.eps_marginal = eps_marginal
-        self._solver = jax.jit(self._forward_solve)
+        self._compiled_solve = jax.jit(self._solve)
 
-    def __call__(self, x, y):
+    def __call__(self, x, y) -> TransportSolution:
         """
-        Solve the optimal transport problem between two point clouds.
+        Solve the transport problem between source and target samples.
 
         Parameters
         ----------
-        x : jax.Array
-            Source samples with shape (n_source, n_features).
-        y : jax.Array
-            Target samples with shape (n_target, n_features).
+        x : jax.Array, shape (n_source, n_features)
+            Source samples.
+        y : jax.Array, shape (n_target, n_features)
+            Target samples.
 
         Returns
         -------
-        SinkhornOutput
-            Sinkhorn solution containing dual potentials, cost matrix,
-            regularized transport cost, convergence state, and iteration count.
+        TransportSolution
+            Fitted dual potentials, cost matrix, transport cost, and
+            convergence diagnostics.
 
         Raises
         ------
         ValueError
-            If the inputs are not two-dimensional, have incompatible feature
-            dimensions, or contain no samples.
-        """
-        self._validate_inputs(x, y)
-        return self._solver(x, y)
-
-    @staticmethod
-    def _validate_inputs(x, y):
-        """
-        Validate source and target point clouds.
-
-        Parameters
-        ----------
-        x : jax.Array
-            Source samples.
-        y : jax.Array
-            Target samples.
-
-        Raises
-        ------
-        ValueError
-            If the arrays are not two-dimensional, their feature dimensions do
-            not match, or either point cloud is empty.
+            If either point cloud is not two-dimensional, the feature
+            dimensions do not match, or either point cloud is empty.
         """
         if x.ndim != 2 or y.ndim != 2:
-            raise ValueError(
-                "x and y must be 2D arrays with shape "
-                "(n_samples, n_features); got "
-                f"x.ndim={x.ndim} and y.ndim={y.ndim}."
-            )
+            raise ValueError("x and y must both be two-dimensional arrays.")
         if x.shape[1] != y.shape[1]:
-            raise ValueError(
-                "x and y must have the same feature dimension; got "
-                f"x.shape={x.shape} and y.shape={y.shape}."
-            )
+            raise ValueError("x and y must have the same feature dimension.")
         if x.shape[0] == 0 or y.shape[0] == 0:
-            raise ValueError(
-                "x and y must each contain at least one sample; got "
-                f"x.shape={x.shape} and y.shape={y.shape}."
-            )
+            raise ValueError("Both point clouds must contain at least one sample.")
+        return self._compiled_solve(x, y)
 
-    def _forward_solve(self, x, y):
+    def solve(self, source, target):
         """
-        Compute the entropy-regularized optimal transport solution.
+        Solve the transport problem using named source and target arguments.
 
         Parameters
         ----------
-        x : jax.Array
-            Source samples with shape (n_source, n_features).
-        y : jax.Array
-            Target samples with shape (n_target, n_features).
+        source : jax.Array, shape (n_source, n_features)
+            Source samples.
+        target : jax.Array, shape (n_target, n_features)
+            Target samples.
 
         Returns
         -------
-        SinkhornOutput
-            Solver output containing the dual potentials, cost matrix,
-            convergence information, and regularized transport cost.
+        TransportSolution
+            Fitted transport solution.
         """
-        num_x = x.shape[0]
-        num_y = y.shape[0]
+        return self(source, target)
 
-        # Defines the marginal densities as empirical measures
-        a, b = jnp.ones((num_x,)) / num_x, jnp.ones((num_y,)) / num_y
+    def _solve(self, x, y):
+        """
+        Compute the transport solution and its convergence diagnostics.
 
-        # Dual potentials in log-domain form
-        u, v = jnp.zeros_like(a), jnp.zeros_like(b)
+        Parameters
+        ----------
+        x : jax.Array, shape (n_source, n_features)
+            Source samples.
+        y : jax.Array, shape (n_target, n_features)
+            Target samples.
 
-        # Pairwise squared-Euclidean cost matrix
-        cost_matrix = self._compute_cost(x, y)
-        # Adds sharding constraints, if sharding is provided
+        Returns
+        -------
+        TransportSolution
+            Dual potentials, cost matrix, transport cost, and convergence state.
+        """
+        # Compute the squared-Euclidean distance between each source
+        # sample and each target sample.
+        cost = _squared_euclidean_cost(x, y)
         if self.sharding is not None:
-            cost_matrix = jax.lax.with_sharding_constraint(cost_matrix, self.sharding)
+            cost = jax.lax.with_sharding_constraint(cost, self.sharding)
 
-        # These quantities are invariant across Sinkhorn iterations. Hoisting
-        # them out of the loop avoids repeated matrix-scale divisions and logs.
-        neg_cost_scaled = -cost_matrix / self.epsilon
-        neg_cost_scaled_t = neg_cost_scaled.T
-        log_a = jnp.log(a + self.eps_marginal)
-        log_b = jnp.log(b + self.eps_marginal)
-
-        # Defines the body function for the while loop.
-        def body_fun(val):
-            """
-            Perform one Sinkhorn fixed-point iteration.
-
-            Parameters
-            ----------
-            val : tuple
-                Current loop state containing the iteration index, source dual
-                potential, target dual potential, and convergence error.
-
-            Returns
-            -------
-            tuple
-                Updated loop state containing the incremented iteration index,
-                updated source and target dual potentials, and convergence error.
-            """
-            i, u, v, _ = val
-            u_previous = u
-            v_previous = v
-
-            # u^{l+1} update in log space.
-            kernel_matrix = (
-                neg_cost_scaled + u[:, None] / self.epsilon + v[None, :] / self.epsilon
-            )
-            u_update = log_a - jax.scipy.special.logsumexp(kernel_matrix, axis=1)
-            u = self.epsilon * u_update + u
-
-            # v^{l+1} update in log space. The transposed precomputed cost avoids
-            # transposing a newly constructed full kernel matrix each iteration.
-            kernel_matrix_t = (
-                neg_cost_scaled_t
-                + v[:, None] / self.epsilon
-                + u[None, :] / self.epsilon
-            )
-            v_update = log_b - jax.scipy.special.logsumexp(kernel_matrix_t, axis=1)
-            v = self.epsilon * v_update + v
-
-            # Compute the stopping error once and carry it in the loop state.
-            error = jnp.linalg.norm(u_previous - u) + jnp.linalg.norm(v_previous - v)
-            return i + 1, u, v, error
-
-        # Condition function for stopping the while loop.
-        def cond_fun(val):
-            """
-            Check whether the Sinkhorn iteration should continue.
-
-            Parameters
-            ----------
-            val : tuple
-                Current loop state containing the iteration index, source dual
-                potential, target dual potential, and convergence error.
-
-            Returns
-            -------
-            jax.Array
-                Boolean condition indicating whether the solver should continue
-                iterating.
-            """
-            i, _, _, error = val
-            return jnp.logical_and(
-                error > self.threshold,
-                i < self.num_iterations,
-            )
-
-        # +inf guarantees that the solver performs at least one iteration.
-        init_error = jnp.asarray(jnp.inf, dtype=u.dtype)
-        num_its, u, v, final_error = jax.lax.while_loop(
-            cond_fun=cond_fun,
-            body_fun=body_fun,
-            init_val=(0, u, v, init_error),
+        # Run Sinkhorn iterations to estimate the source and target
+        # dual potentials. Also retrieve the number of iterations
+        # performed and the final convergence error.
+        source, target, (count, error) = _iterate_potentials(
+            cost,
+            self.epsilon,
+            self.threshold,
+            self.num_iterations,
+            self.eps_marginal,
         )
 
-        # Transport plan pi = exp((-C + u + v) / epsilon)
-        kernel_matrix = (
-            neg_cost_scaled + u[:, None] / self.epsilon + v[None, :] / self.epsilon
+        # Scale the transport costs by the entropic regularization
+        # parameter before reconstructing the transport plan.
+        scaled_cost = -cost / self.epsilon
+
+        # Combine the scaled costs with the source and target dual
+        # potentials to obtain the logarithm of the transport plan.
+        log_plan = (
+            scaled_cost
+            + source[:, None] / self.epsilon
+            + target[None, :] / self.epsilon
         )
-        pi = jnp.exp(kernel_matrix)
 
-        # Regularized Sinkhorn transport cost
-        reg_ot_cost = jnp.sum(pi * cost_matrix, axis=(-2, -1))
+        # Recover the transport plan by exponentiating its logarithm.
+        # The plan has shape (n_source, n_target).
+        plan = jnp.exp(log_plan)
 
-        # Convergence is determined directly from the final stopping error.
-        converged = final_error <= self.threshold
+        # Compute the transport cost as the sum of the elementwise
+        # product of the transport plan and the cost matrix.
+        former_cost = jnp.sum(plan * cost, axis=(-2, -1))
 
-        return SinkhornOutput(
-            potentials=(u, v),
-            cost_matrix=cost_matrix,
+        # Return the fitted potentials, transport problem parameters,
+        # transport cost, and convergence diagnostics.
+        # Convergence is reached when the final change in the dual
+        # potentials is less than or equal to the configured threshold.
+        return TransportSolution(
+            potentials=(source, target),
+            cost_matrix=cost,
             epsilon=self.epsilon,
-            num_iterations=num_its,
-            reg_ot_cost=reg_ot_cost,
-            converged=converged,
+            reg_ot_cost=former_cost,
             threshold=self.threshold,
+            converged=error <= self.threshold,
+            num_iterations=count,
         )
 
-    def _compute_cost(self, x, y):
+    def _potential_at(self, point, potential, y, weights=None):
         """
-        Compute the squared Euclidean distance matrix without creating
-        an array of shape (n_x, n_y, n_features).
+        Evaluate the entropic source potential at one source sample.
 
-        C[i, j] = ||x[i] - y[j]||²
-                = ||x[i]||² + ||y[j]||² - 2 x[i]·y[j]
+        The potential combines the target dual potential, squared-Euclidean
+        costs, and target marginal weights using a weighted log-sum-exp.
 
         Parameters
         ----------
-        x : jax.Array
-            First collection of samples with shape (n_x, n_features).
-        y : jax.Array
-            Second collection of samples with shape (n_y, n_features).
+        point : jax.Array, shape (n_features,)
+            Source sample at which to evaluate the potential.
+        potential : jax.Array, shape (n_target,)
+            Target dual potential obtained from Sinkhorn iterations.
+        y : jax.Array, shape (n_target, n_features)
+            Target samples associated with the dual potential.
+        weights : jax.Array or None
+            Target marginal weights. Uniform weights are used when None.
 
         Returns
         -------
         jax.Array
-            Cost matrix with shape (n_x, n_y).
+            Scalar value of the entropic source potential.
+
+        Raises
+        ------
+        ValueError
+            If the source and target samples have different feature dimensions.
         """
-        x_squared_norm = jnp.sum(
-            jnp.square(x),
-            axis=1,
-            keepdims=True,
+        # Convert the source sample into a two-dimensional array so that
+        # its shape is compatible with the pairwise cost computation.
+        point = jnp.atleast_2d(point)
+
+        # Assign uniform weights to the target samples when no
+        # marginal weights are provided.
+        if weights is None:
+            weights = jnp.ones((y.shape[0],)) / y.shape[0]
+
+        # The source sample and target samples must have the same
+        # number of features to compute squared-Euclidean distances.
+        if point.shape[-1] != y.shape[-1]:
+            raise ValueError("point and y must share the feature dimension.")
+
+        # Compute the squared-Euclidean distance between the source
+        # sample and each target sample.
+        cost = jnp.squeeze(_squared_euclidean_cost(point, y))
+
+        # Combine the target dual potential and the transport costs,
+        # then scale the result by the entropic regularization parameter.
+        scaled_scores = (potential - cost) / self.epsilon
+
+        # Evaluate the entropic source potential using a weighted
+        # log-sum-exp for numerical stability.
+        # The result is a scalar because the potential is evaluated
+        # at a single source sample.
+        return jnp.squeeze(
+            -self.epsilon
+            * logsumexp(
+                scaled_scores,
+                b=weights,
+                axis=-1,
+            )
         )
-
-        y_squared_norm = jnp.sum(
-            jnp.square(y),
-            axis=1,
-            keepdims=True,
-        ).T
-
-        cross_product = x @ y.T
-
-        cost_matrix = x_squared_norm + y_squared_norm - 2.0 * cross_product
-
-        # Round-off may create tiny negative values for theoretically zero
-        # squared distances. Clamp only those numerical artifacts to zero.
-        return jnp.maximum(cost_matrix, 0.0)
-
-    def _log_gibbs_kernel(self, u, v, cost_matrix):
-        """
-        Computes the kernel K = diag(u) exp(-C/eps) diag(v) in log space.
-
-        Parameters
-        ----------
-        u : jax.Array
-            Source dual potential.
-        v : jax.Array
-            Target dual potential.
-        cost_matrix : jax.Array
-            Pairwise transport cost matrix.
-
-        Returns
-        -------
-        jax.Array
-            Logarithm of the rescaled Gibbs kernel.
-        """
-        kernel = -cost_matrix + u[:, None] + v[None, :]
-        kernel /= self.epsilon
-        return kernel
 
     def transport_fn(self, potential, y, weights=None):
-        """
-        Construct the transport function using the formulation in Proposition 2
-        of [2].
+        """Build a vectorized transport function from the target dual potential.
 
-        The transport map is computed from the entropic potential using the
-        gradient-based formulation described in Proposition 2 of [2].
+        The transport map is computed from the gradient of the entropic source
+        potential: T(x) = x - 0.5 * grad(f_epsilon(x)). The factor 0.5 comes
+        from using squared-Euclidean costs without a factor of one half.
 
         Parameters
         ----------
-        potential : jax.Array
-            Dual potential associated with the target samples.
-        y : jax.Array
-            Target samples associated with the potential.
+        potential : jax.Array, shape (n_target,)
+            Target dual potential obtained from Sinkhorn iterations.
+        y : jax.Array, shape (n_target, n_features)
+            Target samples associated with the dual potential.
         weights : jax.Array or None, optional
-            Marginal weights associated with the target samples. Uniform weights
-            are used internally when needed by the potential function.
+            Target marginal weights. Uniform weights are used when None.
 
         Returns
         -------
         callable
-            Function mapping source samples to transported samples.
+            Function accepting an array of shape (n_samples, n_features)
+            and returning the transported samples with the same shape.
         """
 
-        # Computes the potential of set A.
-        def f_eps(x):
+        # Differentiate the entropic potential for each source sample.
+        def single_point_map(point):
             """
-            Evaluate the entropic potential at a source sample.
+            Transport one source sample using the gradient of the entropic potential.
 
             Parameters
             ----------
-            x : jax.Array
-                Source sample where the potential is evaluated.
-
-            Returns
-            -------
-            jax.Array
-                Value of the entropic potential at the input sample.
-            """
-            return self._potential_fn(
-                x,
-                potential,
-                y,
-                weights,
-            )
-
-        # Here we assume that the cost is the Euclidean distance.
-        # In comparison with [2], we do not include the 1/2 factor in the cost,
-        # so the gradient term must be divided by 2.
-        return jax.vmap(lambda x: x - 0.5 * jax.grad(f_eps)(x), in_axes=0, out_axes=0)
-
-    def _potential_fn(
-        self,
-        x,
-        potential,
-        y,
-        weights=None,
-    ):
-        """
-        Compute the entropic potential at the input samples.
-
-        The potential is evaluated using the formulation from Proposition 2
-        of [2], combining the target dual potential, pairwise transport cost,
-        and target marginal weights.
-
-        Parameters
-        ----------
-        x : jax.Array
-            Samples where the potential is evaluated.
-        potential : jax.Array
-            Dual potential associated with the target samples.
-        y : jax.Array
-            Target samples.
-        weights : jax.Array or None, optional
-            Marginal weights associated with the target samples. Uniform weights
-            are used when None.
-
-        Returns
-        -------
-        jax.Array
-            Evaluated entropic potential.
-
-        Raises
-        ------
-        ValueError
-            If x and y do not have the same feature dimension.
-        """
-        x = jnp.atleast_2d(x)
-
-        if weights is None:
-            num_y = y.shape[0]
-            weights = jnp.ones((num_y,)) / num_y
-
-        if x.shape[-1] != y.shape[-1]:
-            raise ValueError(
-                "x and y should have the same feature dimension, but"
-                f" they have shape {x.shape[-1]}, {y.shape[-1]}, respectively."
-            )
-
-        # Computes cost matrix with respect to the current x.
-        cost = jnp.squeeze(self._compute_cost(x, y))
-        z = (potential - cost) / self.epsilon
-        lse = -self.epsilon * jax.scipy.special.logsumexp(z, b=weights, axis=-1)
-        return jnp.squeeze(lse)
-
-    def transport_fn_direct(self, potential, y, weights=None):
-        """
-        Transport directly (not very stable). Using the formulas in [1].
-
-        Parameters
-        ----------
-        potential : jax.Array
-            One-dimensional target dual potential.
-        y : jax.Array
-            Target samples associated with the potential.
-        weights : jax.Array or None
-            Marginal weights associated with the target samples.
-
-        Returns
-        -------
-        callable
-            Function mapping one source sample to its transported value.
-
-        Raises
-        ------
-        ValueError
-            If potential is not one-dimensional or if its length differs from
-            the number of target samples.
-        """
-        if potential.ndim != 1:
-            raise ValueError(
-                "The potential should be a vector, but its dimension are not one,"
-                f" instead {y.ndim}"
-            )
-        if potential.shape[0] != y.shape[0]:
-            raise ValueError(
-                "We assume that the potential comes from solving Sinkhorn, but"
-                f" potential.shape[0] != y.shape[0]: {potential.shape}, {y.shape}"
-            )
-
-        if weights is None:
-            num_y = y.shape[0]
-            weights = jnp.ones((num_y,)) / num_y
-
-        def _transport_direct(x):
-            """
-            Transport a source sample directly using the target potential.
-
-            Parameters
-            ----------
-            x : jax.Array
+            point : jax.Array, shape (n_features,)
                 Source sample to transport.
 
             Returns
             -------
-            jax.Array
-                Transported sample in the target feature space.
+            jax.Array, shape (n_features,)
+                Transported source sample.
             """
-            # The dimension should be (1, num_y)
-            cost = jnp.squeeze(self._compute_cost(x, y))
-            z = jnp.exp((potential - cost) / self.epsilon) * weights
-            # Sum over target samples (axis=0), leaving the feature dimension
-            return jnp.sum(y * z[:, None], axis=0) / jnp.sum(z)
 
-        return _transport_direct
+            def potential_value(x):
+                """
+                Evaluate the entropic potential at one source sample.
+
+                Parameters
+                ----------
+                x : jax.Array, shape (n_features,)
+                    Source sample at which to evaluate the potential.
+
+                Returns
+                -------
+                jax.Array
+                    Scalar value of the entropic potential.
+                """
+                return self._potential_at(x, potential, y, weights)
+
+            return point - 0.5 * jax.grad(potential_value)(point)
+
+        return jax.vmap(single_point_map, in_axes=0, out_axes=0)
+
+    def transport_fn_direct(self, potential, y, weights=None):
+        """
+        Build a direct transport function using the target dual potential.
+
+        This implementation evaluates the transport weights using exponentials
+        without log-sum-exp stabilization and may be numerically unstable.
+
+        Parameters
+        ----------
+        potential : jax.Array, shape (n_target,)
+            Target dual potential obtained from Sinkhorn iterations.
+        y : jax.Array, shape (n_target, n_features)
+            Target samples associated with the dual potential.
+        weights : jax.Array or None, optional
+            Target marginal weights. Uniform weights are used when None.
+
+        Returns
+        -------
+        callable
+            Function transporting one source sample of shape (n_features,)
+            to a target-space sample with the same shape.
+
+        Raises
+        ------
+        ValueError
+            If the target dual potential is not one-dimensional or its length
+            does not match the number of target samples.
+        """
+        if potential.ndim != 1:
+            raise ValueError("potential must be one-dimensional.")
+        if potential.shape[0] != y.shape[0]:
+            raise ValueError("potential and y must have the same sample count.")
+        if weights is None:
+            weights = jnp.ones((y.shape[0],)) / y.shape[0]
+
+        def transport_one(point):
+            """
+            Transport one source sample using the direct entropic transport map.
+
+            The transport weights are computed from the target dual potential and
+            the squared-Euclidean distances to the target samples. The transported
+            sample is obtained as a weighted average of the target samples.
+
+            Parameters
+            ----------
+            point : jax.Array, shape (n_features,)
+                Source sample to transport.
+
+            Returns
+            -------
+            jax.Array, shape (n_features,)
+                Transported source sample.
+            """
+            # Compute squared-Euclidean distances to the target samples.
+            cost = jnp.squeeze(_squared_euclidean_cost(point, y))
+            # Compute the transport weights from the target dual potential.
+            unnormalized = jnp.exp((potential - cost) / self.epsilon) * weights
+            # Compute the weighted average of the target samples.
+            return jnp.sum(y * unnormalized[:, None], axis=0) / jnp.sum(unnormalized)
+
+        return transport_one

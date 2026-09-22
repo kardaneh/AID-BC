@@ -469,6 +469,35 @@ def select_month(data, month):
     return data.isel(time=mask)
 
 
+def prepare_dataarray(data):
+    """
+    Convert and standardize a climate data array for downstream processing.
+
+    The array is converted to float32, loaded into memory, and reordered to
+    use the canonical dimension order time, latitude, longitude.
+
+    Parameters
+    ----------
+    data : xarray.DataArray
+        Climate data array to prepare.
+
+    Returns
+    -------
+    xarray.DataArray
+        Prepared array with float32 values loaded into memory and dimensions
+        ordered as time, latitude, longitude.
+    """
+    return (
+        data.astype(np.float32)
+        .load()
+        .transpose(
+            "time",
+            "latitude",
+            "longitude",
+        )
+    )
+
+
 def resolve_precomputed_variable_root(
     era5_on_cmip6_root,
     variable_name,
@@ -578,7 +607,7 @@ def open_dataarray(path, variable_name):
     Returns
     -------
     xarray.DataArray
-        Requested variable converted to float32 and loaded into memory.
+        Requested variable loaded into memory.
 
     Raises
     ------
@@ -589,21 +618,25 @@ def open_dataarray(path, variable_name):
         if variable_name not in dataset:
             raise ValueError(f"Variable '{variable_name}' not found in {path}.")
 
-        data = dataset[variable_name].astype(np.float32).load()
+        data = dataset[variable_name].load()
 
     return data
 
 
-def load_training_variable_precomputed(
+def load_training_variable(
     train_start,
     train_end,
-    era5_on_cmip6_root,
     cmip6_train_root,
     variable_name,
     logger,
+    era5_root=None,
+    era5_on_cmip6_root=None,
 ):
     """
-    Load one training variable using precomputed ERA5-on-CMIP6 fields.
+    Load one training variable from ERA5 and historical CMIP6 files.
+
+    ERA5 data can either be loaded from raw files and prepared onto the
+    CMIP6 grid, or loaded from previously prepared ERA5-on-CMIP6 files.
 
     Parameters
     ----------
@@ -611,14 +644,16 @@ def load_training_variable_precomputed(
         First training year.
     train_end : int
         Last training year, inclusive.
-    era5_on_cmip6_root : str or pathlib.Path
-        Directory containing precomputed ERA5 fields and metadata.
     cmip6_train_root : str or pathlib.Path
         Directory containing historical CMIP6 yearly files.
     variable_name : str
         Climate variable to load.
     logger : Logger
         Logger used to report progress.
+    era5_root : str or pathlib.Path or None, optional
+        Directory containing raw ERA5 yearly files.
+    era5_on_cmip6_root : str or pathlib.Path or None, optional
+        Directory containing precomputed ERA5-on-CMIP6 fields.
 
     Returns
     -------
@@ -627,216 +662,116 @@ def load_training_variable_precomputed(
     biased_train : xarray.DataArray
         Concatenated historical CMIP6 training data.
     latitude_descending : bool
-        Whether the output latitude coordinate is ordered north to south.
+        Whether latitude is ordered north to south.
 
     Raises
     ------
     ValueError
-        If yearly spatial grids are inconsistent.
-    """
-    metadata, variable_root = load_precomputed_metadata(
-        era5_on_cmip6_root,
-        variable_name,
-        logger,
-    )
-
-    latitude_descending = bool(metadata["latitude_descending"])
-
-    reference_years = []
-    biased_years = []
-
-    reference_grid = None
-    biased_grid = None
-
-    for year in range(train_start, train_end + 1):
-        logger.info(
-            f"Preparing {variable_name}, training year {year} " "(precomputed ERA5)"
-        )
-
-        era5_path = build_path(variable_root, year)
-        cmip6_path = build_path(cmip6_train_root, year)
-
-        reference_year = open_dataarray(
-            era5_path,
-            variable_name,
-        ).transpose(
-            "time",
-            "latitude",
-            "longitude",
-        )
-
-        climate_dataset = ClimateDataset(
-            cmip6_path=cmip6_path,
-            variable_name=variable_name,
-            logger=logger,
-        )
-
-        biased_year = (
-            climate_dataset.prepare_dataset(
-                latitude_descending=latitude_descending,
-            )
-            .astype(np.float32)
-            .load()
-            .transpose(
-                "time",
-                "latitude",
-                "longitude",
-            )
-        )
-
-        climate_dataset.close()
-
-        check_same_spatial_grid(
-            reference_year,
-            biased_year,
-        )
-
-        if reference_grid is None:
-            reference_grid = reference_year
-            biased_grid = biased_year
-        else:
-            check_same_spatial_grid(
-                reference_grid,
-                reference_year,
-            )
-            check_same_spatial_grid(
-                biased_grid,
-                biased_year,
-            )
-
-        reference_years.append(reference_year)
-        biased_years.append(biased_year)
-
-    reference_train = xr.concat(
-        reference_years,
-        dim="time",
-    ).transpose(
-        "time",
-        "latitude",
-        "longitude",
-    )
-
-    biased_train = xr.concat(
-        biased_years,
-        dim="time",
-    ).transpose(
-        "time",
-        "latitude",
-        "longitude",
-    )
-
-    check_same_spatial_grid(
-        reference_train,
-        biased_train,
-    )
-
-    return (
-        reference_train,
-        biased_train,
-        latitude_descending,
-    )
-
-
-def load_training_variable_raw(
-    train_start,
-    train_end,
-    era5_root,
-    cmip6_train_root,
-    variable_name,
-    logger,
-):
-    """
-    Load one training variable from raw ERA5 and historical CMIP6 files.
-
-    Parameters
-    ----------
-    train_start : int
-        First training year.
-    train_end : int
-        Last training year, inclusive.
-    era5_root : str or pathlib.Path
-        Directory containing raw ERA5 yearly files.
-    cmip6_train_root : str or pathlib.Path
-        Directory containing historical CMIP6 yearly files.
-    variable_name : str
-        Climate variable to load and preprocess.
-    logger : Logger
-        Logger used to report progress.
-
-    Returns
-    -------
-    reference_train : xarray.DataArray
-        Concatenated ERA5 data resized onto the native CMIP6 grid.
-    biased_train : xarray.DataArray
-        Concatenated historical CMIP6 data on its native grid.
-    latitude_descending : bool
-        Whether the detected ERA5 latitude coordinate is ordered north to south.
-
-    Raises
-    ------
-    ValueError
-        If spatial grids or latitude orientation are inconsistent between years.
+        If both or neither ERA5 input modes are provided, or if spatial grids
+        or latitude orientation are inconsistent between years.
     RuntimeError
         If no training year is loaded.
     """
+    # Exactly one ERA5 input mode must be selected:
+    # raw ERA5 files or precomputed ERA5-on-CMIP6 files.
+    if (era5_root is None) == (era5_on_cmip6_root is None):
+        raise ValueError("Provide exactly one of era5_root or era5_on_cmip6_root.")
+
+    use_precomputed = era5_on_cmip6_root is not None
+
+    # Precomputed ERA5 files already contain the latitude orientation
+    # required to match the CMIP6 grid.
+    if use_precomputed:
+        metadata, variable_root = load_precomputed_metadata(
+            era5_on_cmip6_root,
+            variable_name,
+            logger,
+        )
+        latitude_descending = bool(metadata["latitude_descending"])
+    else:
+        variable_root = None
+        latitude_descending = None
+
+    # Accumulate yearly ERA5 and CMIP6 fields before concatenating them
+    # along the time dimension.
     reference_years = []
     biased_years = []
 
-    latitude_descending = None
+    # Keep the first yearly grids as references for consistency checks.
     reference_grid = None
     biased_grid = None
 
     for year in range(train_start, train_end + 1):
-        logger.info(f"Preparing {variable_name}, training year {year}")
-
-        era5_path = build_path(era5_root, year)
         cmip6_path = build_path(cmip6_train_root, year)
 
-        climate_dataset = ClimateDataset(
-            era5_path=era5_path,
-            cmip6_path=cmip6_path,
-            variable_name=variable_name,
-            logger=logger,
-        )
-
-        (
-            reference_year,
-            biased_year,
-            current_latitude_descending,
-        ) = climate_dataset.prepare_dataset()
-
-        reference_year = (
-            reference_year.astype(np.float32)
-            .load()
-            .transpose(
-                "time",
-                "latitude",
-                "longitude",
+        if use_precomputed:
+            logger.info(
+                f"Preparing {variable_name}, training year {year} " "(precomputed ERA5)"
             )
-        )
 
-        biased_year = (
-            biased_year.astype(np.float32)
-            .load()
-            .transpose(
-                "time",
-                "latitude",
-                "longitude",
+            era5_path = build_path(variable_root, year)
+
+            # ERA5 is already prepared on the CMIP6 grid
+            reference_year = prepare_dataarray(
+                open_dataarray(
+                    era5_path,
+                    variable_name,
+                )
             )
-        )
+
+            climate_dataset = ClimateDataset(
+                cmip6_path=cmip6_path,
+                variable_name=variable_name,
+                logger=logger,
+            )
+
+            # Prepare CMIP6 using the latitude orientation stored
+            # in the precomputed ERA5 metadata.
+            biased_year = prepare_dataarray(
+                climate_dataset.prepare_dataset(
+                    latitude_descending=latitude_descending,
+                )
+            )
+
+        else:
+            logger.info(f"Preparing {variable_name}, training year {year}")
+
+            era5_path = build_path(era5_root, year)
+
+            climate_dataset = ClimateDataset(
+                era5_path=era5_path,
+                cmip6_path=cmip6_path,
+                variable_name=variable_name,
+                logger=logger,
+            )
+
+            # Raw ERA5 must be prepared and aligned with the native CMIP6 grid.
+            (
+                reference_year,
+                biased_year,
+                current_latitude_descending,
+            ) = climate_dataset.prepare_dataset()
+
+            reference_year = prepare_dataarray(reference_year)
+
+            biased_year = prepare_dataarray(biased_year)
+
+            # Latitude orientation must remain identical across all years.
+            if latitude_descending is None:
+                latitude_descending = current_latitude_descending
+            elif latitude_descending != current_latitude_descending:
+                raise ValueError("ERA5 latitude ordering changes between years.")
 
         climate_dataset.close()
 
+        # ERA5 and CMIP6 must share exactly the same spatial grid
+        # before they can be used for bias correction.
         check_same_spatial_grid(
             reference_year,
             biased_year,
         )
 
-        if latitude_descending is None:
-            latitude_descending = current_latitude_descending
-        elif latitude_descending != current_latitude_descending:
-            raise ValueError("ERA5 latitude ordering changes between years.")
-
+        # Check that the grid remains unchanged from one year to the next.
         if reference_grid is None:
             reference_grid = reference_year
             biased_grid = biased_year
@@ -856,6 +791,7 @@ def load_training_variable_raw(
     if latitude_descending is None:
         raise RuntimeError("No training year was loaded.")
 
+    # Merge all yearly samples into continuous training time series.
     reference_train = xr.concat(
         reference_years,
         dim="time",
@@ -874,6 +810,7 @@ def load_training_variable_raw(
         "longitude",
     )
 
+    # Safety check after concatenation.
     check_same_spatial_grid(
         reference_train,
         biased_train,
@@ -1035,8 +972,6 @@ def load_training_data(
     ValueError
         If variables have inconsistent latitude orientation, grids, times, or
         values.
-    RuntimeError
-        If raw ERA5 paths are required but unavailable.
     """
     reference_variables = {}
     biased_variables = {}
@@ -1046,36 +981,32 @@ def load_training_data(
     for variable_name in variable_names:
         cmip6_train_root = cmip6_train_roots[variable_name]
 
-        if era5_on_cmip6_roots is not None:
-            (
-                reference_variable,
-                biased_variable,
-                latitude_descending,
-            ) = load_training_variable_precomputed(
-                train_start=train_start,
-                train_end=train_end,
-                era5_on_cmip6_root=(era5_on_cmip6_roots[variable_name]),
-                cmip6_train_root=cmip6_train_root,
-                variable_name=variable_name,
-                logger=logger,
-            )
-        else:
-            if era5_roots is None:
-                raise RuntimeError("Internal error: ERA5 roots are unavailable.")
+        # Select the raw ERA5 root when raw inputs are used.
+        era5_root = era5_roots[variable_name] if era5_roots is not None else None
 
-            (
-                reference_variable,
-                biased_variable,
-                latitude_descending,
-            ) = load_training_variable_raw(
-                train_start=train_start,
-                train_end=train_end,
-                era5_root=era5_roots[variable_name],
-                cmip6_train_root=cmip6_train_root,
-                variable_name=variable_name,
-                logger=logger,
-            )
+        # Select the precomputed ERA5-on-CMIP6 root when available.
+        era5_on_cmip6_root = (
+            era5_on_cmip6_roots[variable_name]
+            if era5_on_cmip6_roots is not None
+            else None
+        )
 
+        # Load the current variable using the active ERA5 input mode.
+        (
+            reference_variable,
+            biased_variable,
+            latitude_descending,
+        ) = load_training_variable(
+            train_start=train_start,
+            train_end=train_end,
+            cmip6_train_root=cmip6_train_root,
+            variable_name=variable_name,
+            logger=logger,
+            era5_root=era5_root,
+            era5_on_cmip6_root=era5_on_cmip6_root,
+        )
+
+        # All variables must use the same latitude orientation.
         if common_latitude_descending is None:
             common_latitude_descending = latitude_descending
         elif common_latitude_descending != latitude_descending:
@@ -1084,18 +1015,21 @@ def load_training_data(
         reference_variables[variable_name] = reference_variable
         biased_variables[variable_name] = biased_variable
 
+    # Merge all ERA5 variables into one aligned training dataset.
     reference_train = assemble_variable_dataset(
         reference_variables,
         variable_names,
         label="ERA5 training data",
     )
 
+    # Merge all CMIP6 variables into one aligned training dataset.
     biased_train = assemble_variable_dataset(
         biased_variables,
         variable_names,
         label="CMIP6 training data",
     )
 
+    # ERA5 and CMIP6 must share the same spatial grid before fitting.
     check_same_spatial_grid(
         reference_train[variable_names[0]],
         biased_train[variable_names[0]],
@@ -1171,13 +1105,11 @@ def load_application_data(
                 year,
             )
 
-            reference_variable = open_dataarray(
-                era5_path,
-                variable_name,
-            ).transpose(
-                "time",
-                "latitude",
-                "longitude",
+            reference_variable = prepare_dataarray(
+                open_dataarray(
+                    era5_path,
+                    variable_name,
+                )
             )
 
             climate_dataset = ClimateDataset(
@@ -1186,16 +1118,9 @@ def load_application_data(
                 logger=logger,
             )
 
-            biased_variable = (
+            biased_variable = prepare_dataarray(
                 climate_dataset.prepare_dataset(
                     latitude_descending=latitude_descending,
-                )
-                .astype(np.float32)
-                .load()
-                .transpose(
-                    "time",
-                    "latitude",
-                    "longitude",
                 )
             )
 
@@ -1227,25 +1152,9 @@ def load_application_data(
                     f"{variable_name} in year {year}."
                 )
 
-            reference_variable = (
-                reference_variable.astype(np.float32)
-                .load()
-                .transpose(
-                    "time",
-                    "latitude",
-                    "longitude",
-                )
-            )
+            reference_variable = prepare_dataarray(reference_variable)
 
-            biased_variable = (
-                biased_variable.astype(np.float32)
-                .load()
-                .transpose(
-                    "time",
-                    "latitude",
-                    "longitude",
-                )
-            )
+            biased_variable = prepare_dataarray(biased_variable)
 
         climate_dataset.close()
 
