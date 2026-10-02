@@ -26,15 +26,6 @@ class QM:
     empirical cumulative distribution function (CDF) of each, feature by
     feature, and corrects biased values by matching their quantiles to those
     of the reference distribution.
-
-    Attributes
-    ----------
-    n_features : int or None
-        Number of features, set during fit().
-    _sorted_X : list of numpy.ndarray
-        Sorted biased-dataset samples, one array per feature.
-    _sorted_Y : list of numpy.ndarray
-        Sorted reference-dataset samples, one array per feature.
     """
 
     def __init__(self):
@@ -75,10 +66,10 @@ class QM:
 
         Parameters
         ----------
-        Y0 : numpy.ndarray, shape (n_samples, n_features)
-            Reference dataset (e.g. ERA5).
-        X0 : numpy.ndarray, shape (n_samples, n_features)
-            Biased dataset (e.g. historical model data).
+        Y0 : numpy.ndarray
+            Reference dataset with shape (n_samples, n_features), e.g. ERA5.
+        X0 : numpy.ndarray
+            Biased dataset with shape (n_samples, n_features), e.g. historical model data.
         """
         if Y0.ndim == 1:
             Y0 = Y0.reshape(-1, 1)
@@ -117,13 +108,13 @@ class QM:
 
         Parameters
         ----------
-        X0 : numpy.ndarray, shape (n_samples, n_features)
-            Data to correct.
+        X0 : numpy.ndarray
+            Data to correct with shape (n_samples, n_features).
 
         Returns
         -------
-        numpy.ndarray, shape (n_samples, n_features)
-            Corrected data.
+        numpy.ndarray
+            Corrected data with shape (n_samples, n_features).
         """
         if self.n_features is None:
             raise RuntimeError("QM.fit() must be called before predict().")

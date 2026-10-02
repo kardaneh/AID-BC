@@ -57,26 +57,6 @@ class TransportSolution(NamedTuple):
 
     The source and target dual potentials define the transport plan. The
     remaining fields describe the transport problem and the solver's outcome.
-
-    Attributes
-    ----------
-    potentials : tuple of jax.Array
-        Source and target dual potentials with shapes (n_source,) and
-        (n_target,), respectively.
-    cost_matrix : jax.Array
-        Pairwise squared-Euclidean cost matrix with shape
-        (n_source, n_target).
-    epsilon : float
-        Entropic regularization parameter.
-    reg_ot_cost : jax.Array
-        Transport cost computed as sum(plan * cost_matrix). This retains
-        the previous solver's convention and does not add an entropy term.
-    threshold : float
-        Convergence threshold for changes in the dual potentials.
-    converged : jax.Array
-        Whether the final change in the dual potentials is below threshold.
-    num_iterations : jax.Array
-        Number of Sinkhorn iterations performed.
     """
 
     potentials: tuple[Array, Array]

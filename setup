@@ -168,7 +168,7 @@ cat >> "$sbatch_script" <<EOF
 #SBATCH --gres=gpu:$current_gpus
 #SBATCH --mem=0 #55G, 110G
 #SBATCH --time=10:00:00 #1-00:00:00
-#SBATCH --nodelist=hal13
+#SBATCH --nodelist=hal10
 #SBATCH --mail-user=kkingston@ipsl.fr
 #SBATCH --mail-type=END,FAIL
 EOF

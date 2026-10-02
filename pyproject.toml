@@ -71,11 +71,12 @@ include = [
     "README.rst",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
-    "pre-commit>=3.5.0",
-    "ruff>=0.15.0"
+    "pre-commit==3.5.0",
+    "ruff>=0.15.0",
 ]
+
 docs = [
     "myst-parser>=3.0.1",
     "sphinx>=7.1.2",

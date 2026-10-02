@@ -61,7 +61,12 @@ napoleon_google_docstring = True
 napoleon_numpy_docstring = True
 
 templates_path = ["_templates"]
-exclude_patterns = []
+exclude_patterns = [
+    ".ipynb_checkpoints",
+    ".ipynb_checkpoints/*",
+    "**/.ipynb_checkpoints",
+    "**/.ipynb_checkpoints/*",
+]
 
 # MathJax 3 configuration
 mathjax_path = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
@@ -99,4 +104,5 @@ html_theme_options = {
     "titles_only": False,
 }
 
-html_static_path = ["_static"]
+# No custom static files are used; disabling this avoids a Sphinx warning.
+# html_static_path = ["_static"]

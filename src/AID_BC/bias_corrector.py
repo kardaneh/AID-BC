@@ -39,8 +39,6 @@ class BiasCorrector(ABC):
 
     Attributes
     ----------
-    method_name : str
-        Short identifier of the correction method.
     is_fitted : bool
         Whether the corrector has been fitted.
     n_features : int or None
@@ -64,10 +62,12 @@ class BiasCorrector(ABC):
 
         Parameters
         ----------
-        reference : array-like of shape (n_reference_samples, n_features)
-            Reference observations, for example ERA5 data.
-        biased : array-like of shape (n_biased_samples, n_features)
-            Biased training observations, for example historical CMIP6 data.
+        reference : array-like
+            Reference observations with shape (n_reference_samples, n_features),
+            for example ERA5 data.
+        biased : array-like
+            Biased training observations with shape (n_biased_samples, n_features),
+            for example historical CMIP6 data.
 
         Returns
         -------
@@ -85,8 +85,8 @@ class BiasCorrector(ABC):
 
         Parameters
         ----------
-        data : array-like of shape (n_samples, n_features)
-            Biased application data.
+        data : array-like
+            Biased application data with shape (n_samples, n_features).
 
         Returns
         -------
@@ -105,12 +105,14 @@ class BiasCorrector(ABC):
 
         Parameters
         ----------
-        reference : array-like of shape (n_reference_samples, n_features)
-            Reference observations, for example ERA5 data.
-        biased : array-like of shape (n_biased_samples, n_features)
-            Biased training observations.
-        data : array-like of shape (n_samples, n_features)
-            Biased application data, for example historical CMIP6 data.
+        reference : array-like
+            Reference observations with shape (n_reference_samples, n_features),
+            for example ERA5 data.
+        biased : array-like
+            Biased training observations with shape (n_biased_samples, n_features).
+        data : array-like
+            Biased application data with shape (n_samples, n_features),
+            for example historical CMIP6 data.
 
         Returns
         -------
@@ -255,10 +257,10 @@ class QuantileMappingCorrector(BiasCorrector):
 
         Parameters
         ----------
-        reference : array-like of shape (n_reference_samples, n_features)
-            Reference observations.
-        biased : array-like of shape (n_biased_samples, n_features)
-            Biased training observations.
+        reference : array-like
+            Reference observations with shape (n_reference_samples, n_features).
+        biased : array-like
+            Biased training observations with shape (n_biased_samples, n_features).
 
         Returns
         -------
@@ -302,8 +304,8 @@ class QuantileMappingCorrector(BiasCorrector):
 
         Parameters
         ----------
-        data : array-like of shape (n_samples, n_features)
-            Biased application data.
+        data : array-like
+            Biased application data with shape (n_samples, n_features).
 
         Returns
         -------
@@ -584,10 +586,10 @@ class OptimalTransportCorrector(BiasCorrector):
 
         Parameters
         ----------
-        reference : array-like of shape (n_reference_samples, n_features)
-            ERA5 reference observations.
-        biased : array-like of shape (n_biased_samples, n_features)
-            Historical CMIP6 observations.
+        reference : array-like
+            ERA5 reference observations with shape (n_reference_samples, n_features).
+        biased : array-like
+            Historical CMIP6 observations with shape (n_biased_samples, n_features).
 
         Returns
         -------
@@ -703,8 +705,8 @@ class OptimalTransportCorrector(BiasCorrector):
 
         Parameters
         ----------
-        data : array-like of shape (n_samples, n_features)
-            Biased CMIP6 application data.
+        data : array-like
+            Biased CMIP6 application data with shape (n_samples, n_features).
 
         Returns
         -------
